@@ -1,0 +1,1458 @@
+<!doctype html>
+<!--
+  1992 Tung Chung Valley Archives - archival map interface.
+
+  Built on the QGIS2WebMap / OnlyMap export it replaces: same runtime
+  (onlymap.js), same layers, same feature data. Only the interface around
+  the map was redesigned. The original export is kept in
+  _original_export/index.qgis-export.html.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>1992 Tung Chung Valley Archives</title>
+
+    <style>
+      /* Runtime fallback styling, unchanged from the export. */
+      om-map:not(:defined) {
+        display: block;
+        position: relative;
+        min-height: 240px;
+        background: #eeebe4;
+        color: #0c0e26;
+        font: 14px/1.5 "Courier New", Courier, monospace;
+      }
+      om-map:not(:defined) > :not(om-fallback) { display: none !important; }
+      om-fallback { display: none; }
+      om-map:not(:defined) > om-fallback {
+        display: grid;
+        place-content: center;
+        position: absolute;
+        inset: 0;
+        padding: 24px;
+        text-align: center;
+      }
+      om-map:not(:defined):before {
+        content: "This interactive map requires JavaScript. Open this file from a web server in a modern browser.";
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-content: center;
+        max-width: 36em;
+        margin: 0 auto;
+        padding: 24px;
+        text-align: center;
+      }
+      om-map:not(:defined):has(> om-fallback):before { content: "none"; }
+    </style>
+
+    <style>
+      :root {
+        --ink: #0c0e26;
+        --ink-soft: rgba(12, 14, 38, 0.66);
+        --ink-faint: rgba(12, 14, 38, 0.42);
+        --line: rgba(12, 14, 38, 0.42);
+        --line-soft: rgba(12, 14, 38, 0.16);
+        --panel: rgba(255, 255, 255, 0.35);
+        --panel-solid: rgba(255, 255, 255, 0.82);
+        --type-title: "American Typewriter", "Courier Prime", "Courier New", Courier, monospace;
+        --type-ui: "Courier New", Courier, "American Typewriter", monospace;
+        --credit-h: 46px;
+        --meta-w: 340px;
+      }
+
+      * { box-sizing: border-box; }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #e7e3da;
+      }
+
+      body {
+        font-family: var(--type-ui);
+        color: var(--ink);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* The map fills the viewport and owns its own stacking context, so the
+         interface below always sits above the map's internal widgets. */
+      om-map {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        display: block;
+      }
+
+      /* ---------- title (caption block emitted by the export) ---------- */
+
+      .om-caption {
+        position: fixed;
+        z-index: 40;
+        pointer-events: none;
+      }
+
+      .om-caption-top-left {
+        top: 22px;
+        left: 24px;
+        max-width: min(42ch, calc(100vw - 48px));
+      }
+
+      .om-caption-title {
+        margin: 0;
+        font-family: var(--type-title);
+        font-weight: 700;
+        font-size: clamp(19px, 2.1vw, 26px);
+        line-height: 1.18;
+        letter-spacing: 0.005em;
+        color: var(--ink);
+        /* Outline on the letterforms, not on a box. paint-order keeps the
+           stroke behind the fill where it is supported; the text-shadow is
+           the fallback that does the same job without eating the glyphs. */
+        -webkit-text-stroke: 0.9px #fff;
+        paint-order: stroke fill;
+        text-shadow:
+          0 0 1px #fff,
+          0 0 2px rgba(255, 255, 255, 0.95),
+          0 1px 3px rgba(255, 255, 255, 0.7);
+        text-wrap: balance;
+      }
+
+      /* The abstract sits directly under the title: same typewriter voice,
+         quieter weight, and a soft white halo so it stays legible over both
+         the basemap and the historical imagery. */
+      .om-caption-abstract {
+        margin: 9px 0 0;
+        max-width: 46ch;
+        font-family: var(--type-ui);
+        font-size: clamp(10.5px, 0.82vw, 12px);
+        line-height: 1.62;
+        letter-spacing: 0.012em;
+        color: rgba(12, 14, 38, 0.92);
+        text-shadow:
+          0 0 2px rgba(255, 255, 255, 1),
+          0 0 4px rgba(255, 255, 255, 0.98),
+          0 1px 3px rgba(255, 255, 255, 0.9);
+        text-wrap: pretty;
+      }
+
+      /* ---------- lower-right controls ---------- */
+
+      .controls {
+        position: fixed;
+        right: 18px;
+        bottom: calc(12px + var(--credit-h));
+        z-index: 40;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 10px;
+      }
+
+      .controls-row {
+        display: flex;
+        gap: 8px;
+      }
+
+      .ctl {
+        font-family: var(--type-ui);
+        font-size: 12.5px;
+        line-height: 1;
+        letter-spacing: 0.05em;
+        color: var(--ink);
+        background: var(--panel);
+        -webkit-backdrop-filter: blur(9px) saturate(1.05);
+        backdrop-filter: blur(9px) saturate(1.05);
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        padding: 9px 13px;
+        cursor: pointer;
+      }
+
+      .ctl:hover { background: rgba(255, 255, 255, 0.6); }
+      .ctl:active { background: rgba(255, 255, 255, 0.75); }
+      .ctl[aria-expanded="true"] {
+        background: rgba(255, 255, 255, 0.78);
+        border-color: var(--ink);
+      }
+      .ctl:focus-visible,
+      .panel :focus-visible {
+        outline: 1.5px solid var(--ink);
+        outline-offset: 2px;
+      }
+
+      /* ---------- panels ---------- */
+
+      .panel {
+        width: 274px;
+        background: var(--panel);
+        -webkit-backdrop-filter: blur(11px) saturate(1.05);
+        backdrop-filter: blur(11px) saturate(1.05);
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        padding: 13px 14px 14px;
+        color: var(--ink);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .panel[hidden] { display: none; }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        padding: 0 0 8px;
+        border-bottom: 1px solid var(--line-soft);
+        font-family: var(--type-ui);
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      /* mode options (Timeline / Compare) */
+
+      .panel-sub {
+        margin: -4px 0 8px;
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        color: var(--ink-soft);
+      }
+
+      .opt {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        padding: 7px 0;
+        cursor: pointer;
+      }
+
+      .opt input {
+        appearance: none;
+        -webkit-appearance: none;
+        flex: none;
+        width: 11px;
+        height: 11px;
+        margin: 3px 0 0;
+        border: 1px solid var(--ink);
+        border-radius: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+      .opt input:checked { background: var(--ink); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9); }
+
+      .opt-name { display: block; font-size: 12px; }
+
+      .mode-block { padding-bottom: 4px; }
+      .mode-block + .mode-block { border-top: 1px dotted var(--line-soft); }
+
+      /* compare layer list */
+
+      .cmp-block { margin-top: 2px; }
+
+      .cmp-list {
+        max-height: min(42vh, 320px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        margin: 4px 0 2px;
+        padding-right: 2px;
+      }
+
+      .cmp-item {
+        padding: 6px 0;
+        border-bottom: 1px dotted var(--line-soft);
+      }
+      .cmp-item:last-child { border-bottom: 0; }
+
+      .cmp-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        cursor: pointer;
+      }
+
+      .cmp-row input {
+        appearance: none;
+        -webkit-appearance: none;
+        flex: none;
+        width: 11px;
+        height: 11px;
+        margin: 3px 0 0;
+        border: 1px solid var(--ink);
+        border-radius: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+      .cmp-row input:checked { background: var(--ink); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9); }
+
+      .cmp-name {
+        display: block;
+        font-size: 11px;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+      }
+
+      .cmp-op {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 3px 0 0 20px;
+      }
+
+      .cmp-op input[type="range"] { flex: 1; }
+      .cmp-op input[type="range"]:disabled { cursor: default; opacity: 0.35; }
+
+      .cmp-pct {
+        flex: none;
+        width: 34px;
+        text-align: right;
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+        color: var(--ink-soft);
+      }
+
+      .panel-foot {
+        margin: 10px 0 0;
+        padding-top: 8px;
+        border-top: 1px solid var(--line-soft);
+        font-size: 9.5px;
+        line-height: 1.45;
+        color: var(--ink-soft);
+      }
+
+      /* timeline */
+
+      .period-value {
+        font-family: var(--type-title);
+        font-weight: 700;
+        font-size: 17px;
+        letter-spacing: 0.03em;
+        margin: 0 0 2px;
+      }
+
+      .period-sheets {
+        margin: 0 0 8px;
+        font-size: 9.5px;
+        line-height: 1.35;
+        letter-spacing: 0.02em;
+        color: var(--ink-soft);
+      }
+
+      .slider-block { margin-bottom: 14px; }
+      .slider-block:last-of-type { margin-bottom: 0; }
+
+      .slider-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 7px;
+      }
+
+      .field-label {
+        font-size: 9.5px;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+      }
+
+      .field-value { font-size: 11px; font-variant-numeric: tabular-nums; }
+
+      input[type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+        display: block;
+        width: 100%;
+        height: 16px;
+        margin: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+      input[type="range"]::-webkit-slider-runnable-track {
+        height: 1.5px;
+        background: rgba(12, 14, 38, 0.55);
+      }
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 10px;
+        height: 15px;
+        margin-top: -7px;
+        border: 1px solid var(--ink);
+        border-radius: 1px;
+        background: #fff;
+      }
+      input[type="range"]::-moz-range-track {
+        height: 1.5px;
+        background: rgba(12, 14, 38, 0.55);
+      }
+      input[type="range"]::-moz-range-thumb {
+        width: 8px;
+        height: 13px;
+        border: 1px solid var(--ink);
+        border-radius: 1px;
+        background: #fff;
+      }
+
+      .ticks {
+        position: relative;
+        height: 13px;
+        margin-top: 3px;
+      }
+      .ticks span {
+        position: absolute;
+        top: 0;
+        transform: translateX(-50%);
+        font-size: 9px;
+        letter-spacing: 0.02em;
+        color: var(--ink-soft);
+        white-space: nowrap;
+      }
+      .ticks span:first-child { transform: translateX(-15%); }
+      .ticks span:last-child { transform: translateX(-85%); }
+
+      /* ---------- metadata panel ---------- */
+
+      .meta {
+        position: fixed;
+        right: 18px;
+        top: 92px;
+        bottom: calc(12px + var(--credit-h));
+        z-index: 35;
+        width: var(--meta-w);
+        max-width: calc(100vw - 36px);
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+        -webkit-backdrop-filter: blur(11px) saturate(1.05);
+        backdrop-filter: blur(11px) saturate(1.05);
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        color: var(--ink);
+      }
+
+      .meta[hidden] { display: none; }
+
+      .meta-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px 12px 10px 14px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .meta-eyebrow {
+        margin: 0 0 3px;
+        font-size: 9px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+      }
+
+      .meta-title {
+        margin: 0;
+        font-family: var(--type-title);
+        font-weight: 700;
+        font-size: 15px;
+        line-height: 1.25;
+      }
+
+      .meta-close {
+        flex: none;
+        margin-left: auto;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        font-family: var(--type-ui);
+        font-size: 14px;
+        line-height: 1;
+        color: var(--ink);
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 2px;
+        cursor: pointer;
+      }
+      .meta-close:hover { border-color: var(--line); }
+
+      .meta-body {
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 12px 14px 16px;
+        font-size: 11.5px;
+        line-height: 1.5;
+      }
+
+      .meta figure { margin: 0 0 13px; }
+      .meta figure img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid var(--line-soft);
+        background: rgba(255, 255, 255, 0.6);
+      }
+      .meta figcaption {
+        margin-top: 5px;
+        font-size: 9.5px;
+        line-height: 1.4;
+        color: var(--ink-soft);
+      }
+
+      .subject {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin: 0 0 12px;
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .subject .swatch {
+        width: 9px;
+        height: 9px;
+        border: 1px solid rgba(12, 14, 38, 0.35);
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 92px 1fr;
+        gap: 10px;
+        padding: 5px 0;
+        border-bottom: 1px dotted var(--line-soft);
+      }
+      .row:last-child { border-bottom: 0; }
+      .row dt {
+        margin: 0;
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        padding-top: 2px;
+      }
+      .row dd { margin: 0; overflow-wrap: anywhere; }
+      .row dd.num { font-variant-numeric: tabular-nums; }
+      .row dd.path { font-size: 10px; color: var(--ink-soft); }
+
+      /* controls move out of the metadata panel's way */
+      body.meta-open .controls { right: calc(18px + var(--meta-w) + 16px); }
+
+      /* ---------- hover card ---------- */
+
+      .hovercard {
+        position: fixed;
+        z-index: 30;
+        width: 262px;
+        max-height: min(58vh, 460px);
+        overflow: hidden;
+        padding: 9px 10px 8px;
+        background: rgba(255, 255, 255, 0.58);
+        -webkit-backdrop-filter: blur(8px) saturate(1.05);
+        backdrop-filter: blur(8px) saturate(1.05);
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        color: var(--ink);
+        font-size: 10.5px;
+        line-height: 1.42;
+        pointer-events: none;
+      }
+      .hovercard[hidden] { display: none; }
+
+      .hovercard h3 {
+        margin: 0 0 5px;
+        font-family: var(--type-title);
+        font-weight: 700;
+        font-size: 12px;
+        line-height: 1.25;
+      }
+      .hovercard .hc-row {
+        display: grid;
+        grid-template-columns: 78px 1fr;
+        gap: 7px;
+        padding: 1.5px 0;
+      }
+      .hovercard .hc-label {
+        font-size: 8.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        padding-top: 1.5px;
+      }
+      .hovercard .hc-value { overflow-wrap: anywhere; }
+      .hovercard .hc-foot {
+        margin: 5px 0 0;
+        padding-top: 4px;
+        border-top: 1px solid var(--line-soft);
+        font-size: 8.5px;
+        letter-spacing: 0.04em;
+        color: var(--ink-soft);
+      }
+
+      /* ---------- selected point marker ---------- */
+
+      #marker {
+        position: fixed;
+        left: 0;
+        top: 0;
+        z-index: 20;
+        width: 19px;
+        height: 19px;
+        margin: -9.5px 0 0 -9.5px;
+        border: 1.5px solid var(--ink);
+        border-radius: 50%;
+        box-shadow:
+          0 0 0 1.5px rgba(255, 255, 255, 0.92),
+          inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+        pointer-events: none;
+      }
+      #marker[hidden] { display: none; }
+
+      /* ---------- required credits ---------- */
+
+      .om-credit {
+        position: fixed;
+        left: 18px;
+        bottom: calc(12px + var(--credit-h) + 96px);
+        z-index: 5;
+        max-width: min(24rem, calc(100% - 36px));
+        padding: 3px 6px;
+        border: 1px solid var(--line-soft);
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.55);
+        font-size: 10px;
+        line-height: 1.45;
+        color: var(--ink-soft);
+      }
+      .om-credit a { color: var(--ink); }
+      .om-credit-mark { display: none; }
+      body:has([data-om-badge]) .om-credit { display: none; }
+
+      /* Provider attribution sits above the lower-right controls. */
+      [data-om-widget-slot="bottom-end"] { bottom: 12px !important; }
+
+      /* ---------- responsive ---------- */
+
+      @media (max-width: 900px) {
+        :root { --meta-w: 100%; }
+        body.meta-open .controls { right: 18px; }
+        body.meta-open .controls,
+        body.meta-open .hovercard { display: none; }
+      }
+
+      @media (max-width: 900px) {
+        .meta {
+          left: 12px;
+          right: 12px;
+          top: auto;
+          bottom: 12px;
+          width: auto;
+          max-width: none;
+          max-height: 58vh;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .om-caption-top-left { top: 14px; left: 14px; max-width: calc(100vw - 28px); }
+        .om-caption-title { font-size: 18px; }
+        .om-caption-abstract { margin-top: 7px; font-size: 10.5px; line-height: 1.5; max-width: 34ch; }
+        .controls { right: 12px; bottom: calc(10px + var(--credit-h)); }
+        .panel { width: min(274px, calc(100vw - 24px)); }
+        .meta { top: auto; bottom: 12px; max-height: 62vh; }
+        .hovercard { display: none; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { transition: none !important; animation: none !important; }
+      }
+
+      @media print {
+        .controls, .hovercard, .meta-close { display: none !important; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <om-map
+      center="[113.981440, 22.329037]"
+      zoom="11.07"
+      basemap="osm"
+    >
+      <om-layer
+            id="T1200_190SE_D_196801_modified_22cd3a28_97da_4b43_9a88_708e829d66c5"
+            type="COGLayer"
+            label="T1200-190SE_D-196801_modified"
+            src="layer-1-t1200_190se_d_196801_modified_22cd3a28_97da_4b43.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="T1200_207NE_B_196802_modified_03bddc70_106b_45e1_8e3e_c5ef396adb34"
+            type="COGLayer"
+            label="T1200-207NE_B-196802_modified"
+            src="layer-2-t1200_207ne_b_196802_modified_03bddc70_106b_45e1.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="T1200_190SE_D_197812_modified_4ceb8c13_093f_4108_86c5_91a707ad402d"
+            type="COGLayer"
+            label="T1200-190SE_D-197812_modified"
+            src="layer-3-t1200_190se_d_197812_modified_4ceb8c13_093f_4108.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="T1200_207NE_B_197807_modified_32265cf2_66bb_40a3_b678_0b08c510cfad"
+            type="COGLayer"
+            label="T1200-207NE_B-197807_modified"
+            src="layer-4-t1200_207ne_b_197807_modified_32265cf2_66bb_40a3.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="HP1C_09SE13A_198704_modified_6b95ddb4_348f_49ba_8944_0f3be54c6dd5"
+            type="COGLayer"
+            label="HP1C-09SE13A-198704_modified"
+            src="layer-5-hp1c_09se13a_198704_modified_6b95ddb4_348f_49ba_.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="HP1C_09SE13A_199805_modified_c9110147_e67c_439f_8902_0d509720c0b7"
+            type="COGLayer"
+            label="HP1C-09SE13A-199805_modified"
+            src="layer-6-hp1c_09se13a_199805_modified_c9110147_e67c_439f_.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="HP1C_09SE13A_200803_modified_e43825a2_0ba4_43d2_9692_35abd8dc42e8"
+            type="COGLayer"
+            label="HP1C-09SE13A-200803_modified"
+            src="layer-7-hp1c_09se13a_200803_modified_e43825a2_0ba4_43d2_.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="HP1C_09SE13C_198709_modified_8e0f284f_90e1_44c1_bbc5_c9f937528cc8"
+            type="COGLayer"
+            label="HP1C-09SE13C-198709_modified"
+            src="layer-8-hp1c_09se13c_198709_modified_8e0f284f_90e1_44c1_.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="HP1C_09SE13C_199910_modified_8bce7e8d_9809_4fbd_9e06_7fa580a74597"
+            type="COGLayer"
+            label="HP1C-09SE13C-199910_modified"
+            src="layer-9-hp1c_09se13c_199910_modified_8bce7e8d_9809_4fbd_.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="HP1C_09SE13C_200801_modified_367a29c2_5cde_49c2_9229_2146827a1922"
+            type="COGLayer"
+            label="HP1C-09SE13C-200801_modified"
+            src="layer-10-hp1c_09se13c_200801_modified_367a29c2_5cde_49c2_.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="SE9A_2026"
+            type="COGLayer"
+            label="9SEA_2026"
+            src="layer-11-9se_a_2026.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="SE9C_2026"
+            type="COGLayer"
+            label="9SEC_2026"
+            src="layer-12-9se_c_2026.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="B05_sheet_3c4d874a_b942_4d3a_a0b6_94ff73568ed8"
+            type="GeoJsonLayer"
+            visible="true"
+            filled="true"
+            opacity="1"
+            point-radius-min-pixels="5"
+            label="B05 sheet"
+            get-fill-color="$photo_subject == 'architecture' ? '#a6cee3' : $photo_subject == 'cemetery' ? '#d1d86d' : $photo_subject == 'home altar' ? '#b2df8a' : $photo_subject == 'landscape' ? '#e3a6e1' : $photo_subject == 'shrine' ? '#e3caa6' : $photo_subject == 'village' ? '#7793ce' : '#d45aab'"
+            get-line-color="'#232323'"
+            get-line-width="1"
+            line-width-units="pixels"
+            get-point-radius="3.779528"
+            point-radius-units="pixels"
+            pickable="true"
+            auto-highlight="true"
+            highlight-color="#ffffff55"
+          >
+            <script type="application/json">{"features": [{"geometry": {"coordinates": [113.9281906, 22.2735663], "type": "Point"}, "id": 2, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P01", "flim_keycode": "1-8", "handler": "王羽彤", "location_note": "南輋，亦稱藍輋，位於大嶼山東涌古城附近，鄰近稔園及石榴埔村，同屬大嶼山東涌北部/南部交界一帶的鄉村。村民為李姓，十四世祖由內地遷往新安縣烏蛟騰開基立業，其後人後來遷至藍輋村定居繁衍至今。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P01", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P01.jpg", "photo_subject": "landscape", "photographer": "陳一峰", "photographer_latitude": 22.2735663, "photographer_longitude": 113.9281906, "place_name": "南(藍)輋遠景", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927062, 22.273747], "type": "Point"}, "id": 3, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P02", "flim_keycode": "1-9", "handler": "王羽彤", "location_note": "南輋，亦稱藍輋，位於大嶼山東涌古城附近，鄰近稔園及石榴埔村，同屬大嶼山東涌北部/南部交界一帶的鄉村。村民為李姓，十四世祖由內地遷往新安縣烏蛟騰開基立業，其後人後來遷至藍輋村定居繁衍至今。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P02", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P02.jpg", "photo_subject": "village", "photographer": "陳一峰", "photographer_latitude": 22.273747, "photographer_longitude": 113.927062, "place_name": "南(藍)輋全村", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927137, 22.273731], "type": "Point"}, "id": 4, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P03", "flim_keycode": "1-10", "handler": "王羽彤", "location_note": "村門是村落入口的建築標誌，上寫有村落名「南輋村」，惟「輋」字褪色。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P03", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P03.jpg", "photo_subject": "architecture", "photographer": "N/A", "photographer_latitude": 22.273731, "photographer_longitude": 113.927137, "place_name": "南(藍)輋村門", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 5, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、相片主體與P12/P19相同，但與P06/P07/P08/P10近左一井的伯公神位不同，因此修訂為(或為伯公)神位", "file_name": "B05P04", "flim_keycode": "1-13", "handler": "王羽彤", "location_note": "伯公是客家人對土地公（福德正神、土神）的親暱尊稱，「五祀 (門神、戶神、井神、灶神、土神)」之一。在客家村落中，伯公是守護地方的保護神，常出現在路口、橋頭、樹下或田頭，形式多樣（如石碑、小社壇等）。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P04", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P04.jpg", "photo_subject": "shrine", "photographer": "陳一峰", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村口路旁(或為伯公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927137, 22.273731], "type": "Point"}, "id": 6, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P11/P18主體相同，修訂place_name為「南(藍)輋村門的開門公神位」", "file_name": "B05P05", "flim_keycode": "1-14", "handler": "王羽彤", "location_note": "開門公應是俗稱或村落的獨特叫法，正式名稱是門神，「五祀 (門神、戶神、井神、灶神、土神)」之一，是東亞民間信仰中守衛大門、驅邪避凶、招福迎祥的神靈。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P05", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P05.jpg", "photo_subject": "shrine", "photographer": "N/A", "photographer_latitude": 22.273731, "photographer_longitude": 113.927137, "place_name": "南(藍)輋村門的開門公神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 7, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P09/P13主體相同，修訂place_name為「南(藍)輋村左一井及水井公神位」", "file_name": "B05P06", "flim_keycode": "1-15", "handler": "王羽彤", "location_note": "立於水井上的為水井公神位，又稱井神或與「水井媽」合稱水井公水井媽，為「五祀 (門神、戶神、井神、灶神、土神)」之一，是掌管水井與保障飲水平安的居家保護神。井神多數沒有專屬的大型廟宇，部分地方會在井邊建造小神龕供奉；若有雕刻造像，常為一男一女並肩而坐的石像，分別稱為「水井公」與「水井媽」。古人開新井時會舉行奠祭儀式；家中添丁、產婦滿月第一次挑水時，或在逢年過節、大旱求雨時，往往會向水井燃香、燒紙錢，或先倒半桶水入井以示敬意。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P06", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P06.jpg", "photo_subject": "shrine", "photographer": "陳一峰", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村左一井及水井公神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 8, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P08/P10主體相同，但與P04/P12/P19伯公神位不同，因此修訂為(或為伯公)神位", "file_name": "B05P07", "flim_keycode": "1-16", "handler": "王羽彤", "location_note": "伯公是客家人對土地公（福德正神、土神）的親暱尊稱，「五祀 (門神、戶神、井神、灶神、土神)」之一。在客家村落中，伯公是守護地方的保護神，常出現在路口、橋頭、樹下或田頭，形式多樣（如石碑、小社壇等）。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P07", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P07.jpg", "photo_subject": "shrine", "photographer": "陳一峰", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村近左一井的(或為伯公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 9, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P07/P10主體相同，但與P04/P12/P19伯公神位不同，因此修訂為(或為伯公)神位", "file_name": "B05P08", "flim_keycode": "1-17", "handler": "王羽彤", "location_note": "伯公是客家人對土地公（福德正神、土神）的親暱尊稱，「五祀 (門神、戶神、井神、灶神、土神)」之一。在客家村落中，伯公是守護地方的保護神，常出現在路口、橋頭、樹下或田頭，形式多樣（如石碑、小社壇等）。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P08", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P08.jpg", "photo_subject": "shrine", "photographer": "陳一峰", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村近左一井的(或為伯公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 10, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P06/P13主體相同，修訂place_name為「南(藍)輋村左一井及水井公神位」", "file_name": "B05P09", "flim_keycode": "1-18", "handler": "王羽彤", "location_note": "立於水井上的為水井公神位，又稱井神或與「水井媽」合稱水井公水井媽，為「五祀 (門神、戶神、井神、灶神、土神)」之一，是掌管水井與保障飲水平安的居家保護神。井神多數沒有專屬的大型廟宇，部分地方會在井邊建造小神龕供奉；若有雕刻造像，常為一男一女並肩而坐的石像，分別稱為「水井公」與「水井媽」。古人開新井時會舉行奠祭儀式；家中添丁、產婦滿月第一次挑水時，或在逢年過節、大旱求雨時，往往會向水井燃香、燒紙錢，或先倒半桶水入井以示敬意。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P09", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P09.jpg", "photo_subject": "shrine", "photographer": "陳一峰", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村左一井及水井公神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 11, "properties": {"box_no": "B05", "capture_date_end": "1992", "capture_date_start": "1992", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P07/P08主體相同，但與P04/P12/P19伯公神位不同，因此修訂為(或為伯公)神位", "file_name": "B05P10", "flim_keycode": "4-22", "handler": "王羽彤", "location_note": "伯公是客家人對土地公（福德正神、土神）的親暱尊稱，「五祀 (門神、戶神、井神、灶神、土神)」之一。在客家村落中，伯公是守護地方的保護神，常出現在路口、橋頭、樹下或田頭，形式多樣（如石碑、小社壇等）。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P10", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P10.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村近左一井的(或為伯公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927137, 22.273731], "type": "Point"}, "id": 12, "properties": {"box_no": "B05", "capture_date_end": "1992", "capture_date_start": "1992", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P05/P18主體相同，修訂place_name為「南(藍)輋村門的開門公神位」", "file_name": "B05P11", "flim_keycode": "4-23", "handler": "王羽彤", "location_note": "開門公應是俗稱或村落的獨特叫法，正式名稱是門神，「五祀 (門神、戶神、井神、灶神、土神)」之一，是東亞民間信仰中守衛大門、驅邪避凶、招福迎祥的神靈。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P11", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P11.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273731, "photographer_longitude": 113.927137, "place_name": "南(藍)輋村門的開門公神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 13, "properties": {"box_no": "B05", "capture_date_end": "1992", "capture_date_start": "1992", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、相片主體與P04/P19相同，但與P06/P07/P08/P10近左一井的伯公神位不同，因此修訂為(或為伯公)神位", "file_name": "B05P12", "flim_keycode": "4-20", "handler": "王羽彤", "location_note": "伯公是客家人對土地公（福德正神、土神）的親暱尊稱，「五祀 (門神、戶神、井神、灶神、土神)」之一。在客家村落中，伯公是守護地方的保護神，常出現在路口、橋頭、樹下或田頭，形式多樣（如石碑、小社壇等）。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P12", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P12.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村口路旁(或為伯公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 14, "properties": {"box_no": "B05", "capture_date_end": "1992", "capture_date_start": "1992", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P06/P09主體相同，修訂place_name為「南(藍)輋村左一井及水井公神位」", "file_name": "B05P13", "flim_keycode": "4-21", "handler": "王羽彤", "location_note": "立於水井上的為水井公神位，又稱井神或與「水井媽」合稱水井公水井媽，為「五祀 (門神、戶神、井神、灶神、土神)」之一，是掌管水井與保障飲水平安的居家保護神。井神多數沒有專屬的大型廟宇，部分地方會在井邊建造小神龕供奉；若有雕刻造像，常為一男一女並肩而坐的石像，分別稱為「水井公」與「水井媽」。古人開新井時會舉行奠祭儀式；家中添丁、產婦滿月第一次挑水時，或在逢年過節、大旱求雨時，往往會向水井燃香、燒紙錢，或先倒半桶水入井以示敬意。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P13", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P13.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村左一井及水井公神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.9281906, 22.2735663], "type": "Point"}, "id": 15, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P14", "flim_keycode": "10-24", "handler": "王羽彤", "location_note": "南輋，亦稱藍輋，位於大嶼山東涌古城附近，鄰近稔園及石榴埔村，同屬大嶼山東涌北部/南部交界一帶的鄉村。村民為李姓，十四世祖由內地遷往新安縣烏蛟騰開基立業，其後人後來遷至藍輋村定居繁衍至今。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P14", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P14.jpg", "photo_subject": "landscape", "photographer": "張振江", "photographer_latitude": 22.2735663, "photographer_longitude": 113.9281906, "place_name": "南(藍)輋遠景", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 16, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、新增「當天」別名「天公」作補充", "file_name": "B05P15", "flim_keycode": "10-28", "handler": "王羽彤", "location_note": "當天即「天公」，屬村內神位。拜當天是新居入伙或年節祈福時非常重要的祭祀儀式，通常在上午至中午前吉時，面向屋外或露台向著天空完成，以祈求天神賜福、保佑闔家安康與宅運。儀式順序為先拜當天（天神），次拜地主，後拜門口。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P15", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P15.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村內的當天(天公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 17, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P16", "flim_keycode": "10-29", "handler": "王羽彤", "location_note": "灶君又稱灶神、灶王爺、司命真君，「五祀 (門神、戶神、井神、灶神、土神)」之一，主理廚房與爐火、保佑闔家平安與豐衣足食，同時負有監察全家善惡的任務。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P16", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P16.jpg", "photo_subject": "home altar", "photographer": "張振江", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村內的灶君", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927137, 22.273731], "type": "Point"}, "id": 18, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P17", "flim_keycode": "10-30", "handler": "王羽彤", "location_note": "村門是村落入口的建築標誌，上寫有村落名「南輋村」，惟「輋」字褪色，並以橫批「鴻禧」及「大吉」遮擋，下有對聯，充滿新年喜慶氛圍。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P17", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P17.jpg", "photo_subject": "architecture", "photographer": "張振江", "photographer_latitude": 22.273731, "photographer_longitude": 113.927137, "place_name": "南(藍)輋村門", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927137, 22.273731], "type": "Point"}, "id": 19, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P05/P11主體相同，修訂place_name為「南(藍)輋村門的開門公神位」", "file_name": "B05P18", "flim_keycode": "10-31", "handler": "王羽彤", "location_note": "開門公應是俗稱或村落的獨特叫法，正式名稱是門神，「五祀 (門神、戶神、井神、灶神、土神)」之一，是東亞民間信仰中守衛大門、驅邪避凶、招福迎祥的神靈。神位亦貼上了紅條並「大吉」揮春，充滿新年喜慶氛圍。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P18", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P18.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273731, "photographer_longitude": 113.927137, "place_name": "南(藍)輋村門的開門公神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 20, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、相片主體與P04/P12相同，但與P06/P07/P08/P10近左一井的伯公神位不同，因此修訂為(或為伯公)神位", "file_name": "B05P19", "flim_keycode": "10-32", "handler": "王羽彤", "location_note": "伯公是客家人對土地公（福德正神、土神）的親暱尊稱。在客家村落中，伯公是守護地方的保護神，常出現在路口、橋頭、樹下或田頭，形式多樣（如石碑、小社壇等）。神位亦貼上了紅條並「大吉」揮春，充滿新年喜慶氛圍。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P19", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P19.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村口路旁(或為伯公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 21, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P20", "flim_keycode": "10-33", "handler": "王羽彤", "location_note": "南輋，亦稱藍輋，位於大嶼山東涌古城附近，鄰近稔園及石榴埔村，同屬大嶼山東涌北部/南部交界一帶的鄉村。村民為李姓，十四世祖由內地遷往新安縣烏蛟騰開基立業，其後人後來遷至藍輋村定居繁衍至今，惟「荒地」不等同已確認的廢棄農田。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P20", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P20.jpg", "photo_subject": "landscape", "photographer": "N/A", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋附近荒地", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927606, 22.273463], "type": "Point"}, "id": 22, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體", "file_name": "B05P21", "flim_keycode": "1-11", "handler": "王羽彤", "location_note": "稔園位於大嶼山東涌谷一帶，鄰近藍輋村及石榴埔村，早於1980年代已廢村。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P21", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P21.jpg", "photo_subject": "landscape", "photographer": "陳一峰", "photographer_latitude": 22.273463, "photographer_longitude": 113.927606, "place_name": "稔園遠景", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927279, 22.27257], "type": "Point"}, "id": 23, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、「金塔（稔?右?)」整理為place_name「稔園右側金塔」", "file_name": "B05P22", "flim_keycode": "10-23", "handler": "王羽彤", "location_note": "金塔俗稱「瓦拔」，是中國華南地區與香港傳統喪葬習俗中的一種特製陶土容器，專門用來盛載先人起骨(執骨)後的未經火化實體骨骼。先人土葬約 6 至 12 年後，由執骨師傅破土將骸骨取出、清潔並按人體結構由下而上重新排列放入金塔內，象徵「入土為安」與保持先人身體完整。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P22", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P22.jpg", "photo_subject": "cemetery", "photographer": "張振江", "photographer_latitude": 22.27257, "photographer_longitude": 113.927279, "place_name": "稔園右側金塔", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927606, 22.273463], "type": "Point"}, "id": 24, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體", "file_name": "B05P23", "flim_keycode": "10-25", "handler": "王羽彤", "location_note": "稔園位於大嶼山東涌谷一帶，鄰近藍輋村及石榴埔村，有指早於1980年代已廢村。參考地政總處1987年地圖，只剩下東、西兩房。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P23", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P23.jpg", "photo_subject": "landscape", "photographer": "張振江", "photographer_latitude": 22.273463, "photographer_longitude": 113.927606, "place_name": "稔園遠景", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927177, 22.272402], "type": "Point"}, "id": 25, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、「?房（右）（稔?）」整理為place_name「稔園東房(右)」", "file_name": "B05P24", "flim_keycode": "10-26", "handler": "王羽彤", "location_note": "稔園位於大嶼山東涌谷一帶，鄰近藍輋村及石榴埔村，有指早於1980年代已廢村，參考地政總處1987年地圖只標註兩幢房屋，推斷相中為西邊的村屋。", "location_precision": "Approximate ", "location_source": "Map 1:1 000 9-SE-13C (Ed 1987-09)", "photo_no": "P24", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P24.jpg", "photo_subject": "architecture", "photographer": "張振江", "photographer_latitude": 22.272402, "photographer_longitude": 113.927177, "place_name": "稔園東房(右)", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.92738, 22.272376], "type": "Point"}, "id": 26, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、「?房（左）（稔?）」整理為place_name「稔園東房(左)」", "file_name": "B05P25", "flim_keycode": "10-27", "handler": "王羽彤", "location_note": "稔園位於大嶼山東涌谷一帶，鄰近藍輋村及石榴埔村，有指早於1980年代已廢村，參考地政總處1987年地圖只標註兩幢房屋，推斷相中為東邊的村屋。", "location_precision": "Approximate ", "location_source": "Map 1:1 000 9-SE-13C (Ed 1987-09)", "photo_no": "P25", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P25.jpg", "photo_subject": "architecture", "photographer": "張振江", "photographer_latitude": 22.272376, "photographer_longitude": 113.92738, "place_name": "稔園東房(左)", "sorting_date": "26-Aug-26"}, "type": "Feature"}], "type": "FeatureCollection"}</script>
+          </om-layer>
+      <om-layer
+            id="B05_sheet_3c4d874a_b942_4d3a_a0b6_94ff73568ed8-labels"
+            type="TextLayer"
+            label="B05 sheet (labels)"
+            get-text="$label"
+            get-position="$geometry.coordinates"
+            get-color="'#323232'"
+            get-size="16"
+            size-units="pixels"
+            font-family="Open Sans"
+            get-alignment-baseline="'bottom'"
+            get-pixel-offset="[0, -5.779528]"
+            background="true"
+            get-background-color="'#ffffffcc'"
+            background-padding="[4.15748, 2.07874]"
+            character-set="()一井伯位側內全公南及口右君園地塔天左或房旁景村東水灶為當的神稔荒藍路輋近遠金門開附"
+            visible-zoom-range="[18, 30]"
+          >
+            <script type="application/json">{"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.9281906, 22.2735663]}, "properties": {"label": "南(藍)輋遠景"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927062, 22.273747]}, "properties": {"label": "南(藍)輋全村"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927137, 22.273731]}, "properties": {"label": "南(藍)輋村門"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927013, 22.273827]}, "properties": {"label": "南(藍)輋村口路旁(或為伯公)神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927137, 22.273731]}, "properties": {"label": "南(藍)輋村門的開門公神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927013, 22.273827]}, "properties": {"label": "南(藍)輋村左一井及水井公神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927013, 22.273827]}, "properties": {"label": "南(藍)輋村近左一井的(或為伯公)神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927013, 22.273827]}, "properties": {"label": "南(藍)輋村近左一井的(或為伯公)神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927013, 22.273827]}, "properties": {"label": "南(藍)輋村左一井及水井公神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927013, 22.273827]}, "properties": {"label": "南(藍)輋村近左一井的(或為伯公)神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927137, 22.273731]}, "properties": {"label": "南(藍)輋村門的開門公神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927013, 22.273827]}, "properties": {"label": "南(藍)輋村口路旁(或為伯公)神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927013, 22.273827]}, "properties": {"label": "南(藍)輋村左一井及水井公神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.9281906, 22.2735663]}, "properties": {"label": "南(藍)輋遠景"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927013, 22.273827]}, "properties": {"label": "南(藍)輋村內的當天(天公)神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927013, 22.273827]}, "properties": {"label": "南(藍)輋村內的灶君"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927137, 22.273731]}, "properties": {"label": "南(藍)輋村門"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927137, 22.273731]}, "properties": {"label": "南(藍)輋村門的開門公神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927013, 22.273827]}, "properties": {"label": "南(藍)輋村口路旁(或為伯公)神位"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927013, 22.273827]}, "properties": {"label": "南(藍)輋附近荒地"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927606, 22.273463]}, "properties": {"label": "稔園遠景"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927279, 22.27257]}, "properties": {"label": "稔園右側金塔"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927606, 22.273463]}, "properties": {"label": "稔園遠景"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.927177, 22.272402]}, "properties": {"label": "稔園東房(右)"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [113.92738, 22.272376]}, "properties": {"label": "稔園東房(左)"}}]}</script>
+          </om-layer>
+      <om-widget type="zoom-controls" position="bottom-left"></om-widget>
+      <om-widget type="scale-bar" position="bottom-left"></om-widget>
+      <om-fallback>
+        <div>
+          <h1>1992 Tung Chung Valley Archives</h1>
+          <p>This interactive map needs JavaScript. Open this page in a web browser to view it.</p>
+        </div>
+      </om-fallback>
+    </om-map>
+
+    <div class="om-caption om-caption-top-left">
+      <div class="om-caption-title">1992 Tung Chung Valley Archives</div>
+      <p class="om-caption-abstract">With the Rose Garden Project — the building of the new airport at Chek Lap Kok — under way, the development of Tung Chung New Town was also placed on the agenda, and the Government commissioned the Department of Anthropology of The Chinese University of Hong Kong to carry out large-scale ethnographic research in the Tung Chung Valley around 1992.</p>
+    </div>
+
+    <aside class="meta" id="meta" hidden aria-label="Record details">
+      <div class="meta-head">
+        <div>
+          <p class="meta-eyebrow" id="meta-eyebrow">Record</p>
+          <h2 class="meta-title" id="meta-title"></h2>
+        </div>
+        <button class="meta-close" id="meta-close" type="button" aria-label="Close record details">&#10005;</button>
+      </div>
+      <div class="meta-body" id="meta-body"></div>
+    </aside>
+
+    <div class="hovercard" id="hovercard" hidden aria-hidden="true"></div>
+    <div id="marker" hidden></div>
+
+    <div class="controls" id="controls">
+      <section class="panel panel-layers" id="panel-layers" hidden aria-label="Map layers">
+        <h2>Map Layers</h2>
+        <p class="panel-sub">Spatial and Topographic Images</p>
+
+        <div class="mode-block">
+          <label class="opt mode">
+            <input type="checkbox" id="mode-timeline" />
+            <span class="opt-name">Timeline</span>
+          </label>
+
+          <div class="tl-block" id="tl-block" hidden>
+            <div class="slider-block">
+              <p class="period-value" id="period-value">1968</p>
+              <p class="period-sheets" id="period-sheets"></p>
+              <div class="slider-head">
+                <span class="field-label">Imagery period</span>
+              </div>
+              <input type="range" id="period" min="0" max="4" step="1" value="0"
+                     aria-label="Historical imagery period" />
+              <div class="ticks" aria-hidden="true">
+                <span style="left: 2%">1968</span>
+                <span style="left: 26%">1978</span>
+                <span style="left: 50%">1998&#8211;99</span>
+                <span style="left: 74%">2008</span>
+                <span style="left: 98%">2026</span>
+              </div>
+            </div>
+
+            <div class="slider-block">
+              <div class="slider-head">
+                <label class="field-label" for="opacity">Imagery opacity</label>
+                <span class="field-value" id="opacity-value">100%</span>
+              </div>
+              <input type="range" id="opacity" min="0" max="100" step="1" value="100"
+                     aria-label="Timeline imagery opacity" />
+            </div>
+          </div>
+        </div>
+
+        <div class="mode-block">
+          <label class="opt mode">
+            <input type="checkbox" id="mode-compare" />
+            <span class="opt-name">Compare</span>
+          </label>
+
+          <div class="cmp-block" id="cmp-block" hidden>
+            <div class="cmp-list" id="cmp-list" role="group" aria-label="Imagery layers"></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="controls-row">
+        <button class="ctl" id="btn-layers" type="button" aria-expanded="false" aria-controls="panel-layers">Map Layers</button>
+      </div>
+    </div>
+
+    <footer class="om-credit">
+      <span class="om-credit-row">Built with
+        <a href="https://onlymap.nikaplanet.com/" target="_blank" rel="noopener noreferrer">OnlyMap</a>
+        by <a href="https://nikaplanet.com" target="_blank" rel="noopener noreferrer">NIKA</a></span>
+    </footer>
+
+    <script type="module">
+      /* ------------------------------------------------------------------
+         Runtime boot: uncompress the embedded layer data, then load the
+         OnlyMap runtime. Unchanged from the export.
+         ------------------------------------------------------------------ */
+      const inflate = async (text) => {
+        const bytes = Uint8Array.from(atob(text.trim()), (c) => c.charCodeAt(0));
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+        return await new Response(stream).text();
+      };
+
+      for (const block of document.querySelectorAll('script[type="application/x-om-gzip"]')) {
+        const json = document.createElement("script");
+        json.type = "application/json";
+        json.textContent = await inflate(block.textContent);
+        block.replaceWith(json);
+      }
+
+      const errorPanel = document.createElement("details");
+      errorPanel.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:9999;max-width:min(650px,90vw);max-height:35vh;overflow:auto;background:#fff5ed;color:#522;padding:8px;font:12px/1.5 monospace;display:none";
+      const errorSummary = document.createElement("summary");
+      errorSummary.textContent = "Map loading errors — click to expand";
+      const errorText = document.createElement("pre");
+      errorText.style.whiteSpace = "pre-wrap";
+      errorPanel.append(errorSummary, errorText);
+      document.body.append(errorPanel);
+      const seenErrors = new Set();
+      const report = (detail) => {
+        const text = typeof detail === "string" ? detail : JSON.stringify(detail, null, 2);
+        if (seenErrors.has(text)) return;
+        seenErrors.add(text);
+        errorPanel.style.display = "block";
+        errorText.textContent += text + "\n\n";
+        console.error(detail);
+      };
+      document.addEventListener("archive-map-error", event => report(event.detail));
+      window.addEventListener("unhandledrejection", event => report(String(event.reason?.stack || event.reason)));
+      window.addEventListener("error", event => { if (event.message) report(event.message); });
+      for (const el of document.querySelectorAll('om-layer[type="COGLayer"]')) {
+        el.setAttribute("src", new URL(el.getAttribute("src"), document.baseURI).href);
+      }
+      try { await import("./onlymap.js?archive-fix=20261103b"); }
+      catch (error) { report("OnlyMap import failed: " + error.message); throw error; }
+
+
+      /* ------------------------------------------------------------------
+         Interface controller
+         ------------------------------------------------------------------ */
+      const mapEl = document.querySelector("om-map");
+      mapEl.diagnostics = true;
+      mapEl.addEventListener("om-validation-error", event => {
+        for (const error of event.detail?.errors || []) report(error);
+      });
+
+      // Layer ids exactly as exported from QGIS2WebMap.
+      const POINTS = "B05_sheet_3c4d874a_b942_4d3a_a0b6_94ff73568ed8";
+
+      // All spatial/topographic imagery managed by the Map Layers panel.
+      // Order is the fixed stacking order (bottom to top, as exported);
+      // labels are display names only — source files and ids are unchanged.
+      const IMAGERY = [
+        { id: "T1200_190SE_D_196801_modified_22cd3a28_97da_4b43_9a88_708e829d66c5", label: "190se_d_1968/01" },
+        { id: "T1200_207NE_B_196802_modified_03bddc70_106b_45e1_8e3e_c5ef396adb34", label: "207ne_b_1968/02" },
+        { id: "T1200_190SE_D_197812_modified_4ceb8c13_093f_4108_86c5_91a707ad402d", label: "190se_d_1978/12" },
+        { id: "T1200_207NE_B_197807_modified_32265cf2_66bb_40a3_b678_0b08c510cfad", label: "207ne_b_1978/07" },
+        { id: "HP1C_09SE13A_198704_modified_6b95ddb4_348f_49ba_8944_0f3be54c6dd5", label: "09se13a_1987/04" },
+        { id: "HP1C_09SE13A_199805_modified_c9110147_e67c_439f_8902_0d509720c0b7", label: "09se13a_1998/05" },
+        { id: "HP1C_09SE13A_200803_modified_e43825a2_0ba4_43d2_9692_35abd8dc42e8", label: "09se13a_2008/03" },
+        { id: "HP1C_09SE13C_198709_modified_8e0f284f_90e1_44c1_bbc5_c9f937528cc8", label: "09se13c_1987/09" },
+        { id: "HP1C_09SE13C_199910_modified_8bce7e8d_9809_4fbd_9e06_7fa580a74597", label: "09se13c_1999/10" },
+        { id: "HP1C_09SE13C_200801_modified_367a29c2_5cde_49c2_9229_2146827a1922", label: "09se13c_2008/01" },
+        { id: "SE9A_2026", label: "9SEA_2026" },
+        { id: "SE9C_2026", label: "9SEC_2026" }
+      ];
+
+      // Timeline: five discrete positions. Each position is a group of sheets
+      // shown together (the 2026 position uses the two 9-SE sheets that
+      // replaced the broken layer0 topographic file).
+      const PERIODS = [
+        {
+          label: "1968",
+          layers: [
+            "T1200_190SE_D_196801_modified_22cd3a28_97da_4b43_9a88_708e829d66c5",
+            "T1200_207NE_B_196802_modified_03bddc70_106b_45e1_8e3e_c5ef396adb34"
+          ],
+          sheets: "T1200-190SE_D-196801 / T1200-207NE_B-196802"
+        },
+        {
+          label: "1978",
+          layers: [
+            "T1200_190SE_D_197812_modified_4ceb8c13_093f_4108_86c5_91a707ad402d",
+            "T1200_207NE_B_197807_modified_32265cf2_66bb_40a3_b678_0b08c510cfad"
+          ],
+          sheets: "T1200-190SE_D-197812 / T1200-207NE_B-197807"
+        },
+        {
+          label: "1998\u20131999",
+          layers: [
+            "HP1C_09SE13A_199805_modified_c9110147_e67c_439f_8902_0d509720c0b7",
+            "HP1C_09SE13C_199910_modified_8bce7e8d_9809_4fbd_9e06_7fa580a74597"
+          ],
+          sheets: "HP1C-09SE13A-199805 / HP1C-09SE13C-199910"
+        },
+        {
+          label: "2008",
+          layers: [
+            "HP1C_09SE13A_200803_modified_e43825a2_0ba4_43d2_9692_35abd8dc42e8",
+            "HP1C_09SE13C_200801_modified_367a29c2_5cde_49c2_9229_2146827a1922"
+          ],
+          sheets: "HP1C-09SE13A-200803 / HP1C-09SE13C-200801"
+        },
+        {
+          label: "2026",
+          layers: [
+            "SE9A_2026",
+            "SE9C_2026"
+          ],
+          sheets: "9-SE-A / 9-SE-C (2026 Official Digital Topographic Map)"
+        }
+      ];
+
+      // Fields rendered in the hover card and the record panel. Working
+      // columns (photo no., box, file name, source, film keycode, handler,
+      // sorting date, photograph path, …) are deliberately not displayed.
+      const FIELDS = [
+        ["photo_subject", "Type"],
+        ["place_name", "Place"],
+        ["photographer", "Photographer"],
+        ["photographer_latitude", "Latitude"],
+        ["photographer_longitude", "Longitude"],
+        ["location_precision", "Precision"],
+        ["location_note", "Note"]
+      ];
+
+      // Capture dates are combined into a single "Date" row: one value when
+      // start and end are the same day, otherwise "start - end".
+      const DATE_KEYS = ["capture_date_start", "capture_date_end"];
+
+      const dateText = (props) => {
+        const start = hasValue(props.capture_date_start) ? String(props.capture_date_start).trim() : "";
+        const end = hasValue(props.capture_date_end) ? String(props.capture_date_end).trim() : "";
+        if (start && end && start === end) return start;
+        if (start && end) return `${start} - ${end}`;
+        return start || end;
+      };
+
+      // Ordered display rows for a record: the combined date first, then the
+      // remaining whitelisted fields that actually have a value.
+      const displayRows = (props) => {
+        const rows = [];
+        const date = dateText(props);
+        if (date) rows.push(["capture_date", "Date", date]);
+        for (const [key, label] of FIELDS) {
+          if (hasValue(props[key])) rows.push([key, label, props[key]]);
+        }
+        return rows;
+      };
+
+      // Hard rule for every popup surface (hover card + record panel): a data
+      // column is shown only via displayRows() above. Any other column — in
+      // particular raw working columns whose name contains an underscore,
+      // such as "cleaning_note" — is stripped before rendering, so it can
+      // never appear even if new columns are added to the data. A few
+      // internal keys stay available because the interface itself needs them
+      // (the photo image, the record title, the combined date).
+      const INTERNAL_KEYS = ["file_name", "capture_date_start", "capture_date_end"];
+      const APPROVED_KEYS = new Set(FIELDS.map(([key]) => key).concat(INTERNAL_KEYS));
+      const isInternalColumn = (key) =>
+        typeof key === "string" && key.includes("_") && !APPROVED_KEYS.has(key);
+      const publicProps = (props) => {
+        const clean = {};
+        for (const [key, value] of Object.entries(props || {})) {
+          if (!isInternalColumn(key)) clean[key] = value;
+        }
+        return clean;
+      };
+
+      const SUBJECT_COLOURS = {
+        architecture: "#a6cee3",
+        cemetery: "#d1d86d",
+        "home altar": "#b2df8a",
+        landscape: "#e3a6e1",
+        shrine: "#e3caa6",
+        village: "#7793ce"
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const layerEl = (id) => document.querySelector(`om-layer[id="${CSS.escape(id)}"]`);
+
+      const state = {
+        // "timeline" | "compare" | null (mutually exclusive)
+        mode: null,
+        period: 0,
+        tlOpacity: 1,
+        // per-layer Compare state, independent of Timeline opacity:
+        // id -> { on: boolean, opacity: 0..1 }
+        compare: new Map(IMAGERY.map(({ id }) => [id, { on: false, opacity: 1 }])),
+        panelOpen: false,
+        selected: null
+      };
+
+      /* ---------------- layer control ---------------- */
+
+      const setVisible = (id, on) => {
+        const el = layerEl(id);
+        if (!el) return;
+        const want = on ? "true" : "false";
+        if (el.getAttribute("visible") !== want) el.setAttribute("visible", want);
+      };
+
+      const setOpacity = (id, value) => {
+        const el = layerEl(id);
+        if (!el) return;
+        const want = String(Math.round(value * 1000) / 1000);
+        if (el.getAttribute("opacity") !== want) el.setAttribute("opacity", want);
+      };
+
+      // The single source of truth for which imagery is on screen. The open-map
+      // basemap ("osm") is permanent and is never touched here; points and
+      // overlays are never touched either. Stacking order is fixed by the
+      // order of the om-layer elements in the markup, so it never depends on
+      // the order in which layers are switched on.
+      const applyLayers = () => {
+        const active = new Set(state.mode === "timeline" ? PERIODS[state.period].layers : []);
+        for (const { id } of IMAGERY) {
+          const saved = state.compare.get(id);
+          const on = state.mode === "timeline" ? active.has(id)
+            : state.mode === "compare" && !!saved?.on;
+          if (on) setOpacity(id, state.mode === "timeline" ? state.tlOpacity : saved.opacity);
+          setVisible(id, !!on);
+        }
+      };
+
+      /* ---------------- credits ---------------- */
+
+      const creditSlot = () => document.querySelector('[data-om-widget-slot="bottom-end"]');
+
+      const measureCredit = () => {
+        const slot = creditSlot();
+        const h = slot ? Math.ceil(slot.getBoundingClientRect().height) : 0;
+        document.documentElement.style.setProperty("--credit-h", `${h + 22}px`);
+      };
+
+      /* ---------------- Map Layers panel ---------------- */
+
+      const panel = $("panel-layers");
+      const btnLayers = $("btn-layers");
+
+      // Opening/closing the panel never changes layers, mode state, opacity,
+      // or the camera — it only shows or hides the controls themselves.
+      const setPanelOpen = (open) => {
+        state.panelOpen = open;
+        panel.hidden = !open;
+        btnLayers.setAttribute("aria-expanded", open ? "true" : "false");
+      };
+
+      btnLayers.addEventListener("click", () => setPanelOpen(!state.panelOpen));
+
+      /* ---------------- mode switching ---------------- */
+
+      const modeTimeline = $("mode-timeline");
+      const modeCompare = $("mode-compare");
+      const tlBlock = $("tl-block");
+      const cmpBlock = $("cmp-block");
+
+      // Timeline and Compare are mutually exclusive; clicking the active mode
+      // unchecks it and hides all panel-managed imagery (open-map basemap and
+      // points stay on). Each mode keeps its own saved settings, so switching
+      // back restores exactly what that mode had before.
+      const setMode = (mode) => {
+        state.mode = state.mode === mode ? null : mode;
+        modeTimeline.checked = state.mode === "timeline";
+        modeCompare.checked = state.mode === "compare";
+        tlBlock.hidden = state.mode !== "timeline";
+        cmpBlock.hidden = state.mode !== "compare";
+        applyLayers();
+      };
+
+      modeTimeline.addEventListener("change", () => setMode("timeline"));
+      modeCompare.addEventListener("change", () => setMode("compare"));
+
+      /* ---------------- timeline controls ---------------- */
+
+      const periodInput = $("period");
+      const periodValue = $("period-value");
+      const periodSheets = $("period-sheets");
+      const opacityInput = $("opacity");
+      const opacityValue = $("opacity-value");
+
+      const showPeriodLabel = () => {
+        const period = PERIODS[state.period];
+        periodValue.textContent = period.label;
+        if (periodSheets) periodSheets.textContent = `2 sheets \u00b7 ${period.sheets}`;
+      };
+
+      showPeriodLabel();
+
+      periodInput.addEventListener("input", () => {
+        state.period = Number(periodInput.value);
+        showPeriodLabel();
+        // The saved timeline opacity carries across positions.
+        applyLayers();
+      });
+
+      let opacityRaf = 0;
+      opacityInput.addEventListener("input", () => {
+        state.tlOpacity = Number(opacityInput.value) / 100;
+        opacityValue.textContent = `${opacityInput.value}%`;
+        if (state.mode !== "timeline") return;
+        // Each attribute write makes the runtime rebuild the layer, so batch
+        // the two sheets into one animation frame while the slider is dragged.
+        if (opacityRaf) return;
+        opacityRaf = requestAnimationFrame(() => {
+          opacityRaf = 0;
+          for (const id of PERIODS[state.period].layers) setOpacity(id, state.tlOpacity);
+        });
+      });
+
+      /* ---------------- compare list ---------------- */
+
+      const cmpList = $("cmp-list");
+
+      for (const { id, label } of IMAGERY) {
+        const saved = state.compare.get(id);
+
+        const item = document.createElement("div");
+        item.className = "cmp-item";
+
+        const row = document.createElement("label");
+        row.className = "cmp-row";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.dataset.id = id;
+        box.addEventListener("change", () => {
+          saved.on = box.checked;
+          range.disabled = !box.checked;
+          applyLayers();
+        });
+        const name = document.createElement("span");
+        name.className = "cmp-name";
+        name.textContent = label;
+        row.append(box, name);
+
+        const op = document.createElement("div");
+        op.className = "cmp-op";
+        const range = document.createElement("input");
+        range.type = "range";
+        range.min = "0";
+        range.max = "100";
+        range.step = "1";
+        range.value = "100";
+        range.disabled = true;
+        range.setAttribute("aria-label", `Opacity \u2014 ${label}`);
+        const pct = document.createElement("span");
+        pct.className = "cmp-pct";
+        pct.textContent = "100%";
+        let compareRaf = 0;
+        range.addEventListener("input", () => {
+          saved.opacity = Number(range.value) / 100;
+          pct.textContent = `${range.value}%`;
+          if (!saved.on) return;
+          if (compareRaf) return;
+          compareRaf = requestAnimationFrame(() => {
+            compareRaf = 0;
+            if (state.mode === "compare" && saved.on) setOpacity(id, saved.opacity);
+          });
+        });
+        op.append(range, pct);
+
+        item.append(row, op);
+        cmpList.appendChild(item);
+      }
+
+      /* ---------------- picking ---------------- */
+
+      const propsOf = (picked) => {
+        if (!picked || picked.layerId !== POINTS) return null;
+        const object = picked.object ?? {};
+        // Strip internal columns (e.g. "cleaning_note") at the single point
+        // where picked data enters the interface, so the hover card and the
+        // record panel can only ever see whitelisted, displayable fields.
+        const props = publicProps(object.properties ?? object);
+        if (!props || !props.file_name) return null;
+        return props;
+      };
+
+      const pickAt = (clientX, clientY, radius) => {
+        const rect = mapEl.getBoundingClientRect();
+        if (typeof mapEl.pickAt !== "function") return null;
+        let hit = null;
+        try {
+          hit = mapEl.pickAt([clientX - rect.left, clientY - rect.top], { radius, layers: [POINTS] });
+        } catch (error) {
+          return null;
+        }
+        return propsOf(hit);
+      };
+
+      const overWidget = (event) =>
+        event.composedPath().some((node) => node && node.tagName === "OM-WIDGET");
+
+      const escapeHtml = (value) =>
+        String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+      const hasValue = (value) => value !== null && value !== undefined && String(value).trim() !== "";
+
+      /* ---------------- hover card ---------------- */
+
+      const hovercard = $("hovercard");
+      let hoverRaf = 0;
+      let hoverPoint = null;
+
+      const hideHover = () => {
+        hovercard.hidden = true;
+        hoverPoint = null;
+      };
+
+      const showHover = (props, x, y) => {
+        const rows = displayRows(props)
+          .map(
+            ([, label, value]) =>
+              `<div class="hc-row"><span class="hc-label">${escapeHtml(label)}</span><span class="hc-value">${escapeHtml(value)}</span></div>`
+          )
+          .join("");
+        hovercard.innerHTML = `<h3>${escapeHtml(props.place_name || "Record")}</h3>${rows}<p class="hc-foot">Click for the full record</p>`;
+        hovercard.hidden = false;
+
+        const gap = 16;
+        const box = hovercard.getBoundingClientRect();
+        let left = x + gap;
+        let top = y - box.height / 2;
+        if (left + box.width > window.innerWidth - 12) left = x - box.width - gap;
+        top = Math.max(12, Math.min(top, window.innerHeight - box.height - 12));
+        hovercard.style.left = `${Math.max(12, left)}px`;
+        hovercard.style.top = `${top}px`;
+      };
+
+      mapEl.addEventListener("pointermove", (event) => {
+        if (event.pointerType === "touch") return;
+        if (overWidget(event)) {
+          hideHover();
+          return;
+        }
+        if (hoverRaf) return;
+        hoverRaf = requestAnimationFrame(() => {
+          hoverRaf = 0;
+          const props = pickAt(event.clientX, event.clientY, 6);
+          if (props) showHover(props, event.clientX, event.clientY);
+          else hideHover();
+        });
+      });
+
+      mapEl.addEventListener("pointerleave", hideHover);
+
+      /* ---------------- metadata panel ---------------- */
+
+      const meta = $("meta");
+      const metaBody = $("meta-body");
+      const metaTitle = $("meta-title");
+      const metaEyebrow = $("meta-eyebrow");
+      const marker = $("marker");
+      let markerRaf = 0;
+      let markerLngLat = null;
+
+      const syncMarker = () => {
+        if (!markerLngLat || meta.hidden || typeof mapEl.project !== "function") {
+          markerRaf = 0;
+          return;
+        }
+        const point = mapEl.project(markerLngLat);
+        if (point && Number.isFinite(point[0])) {
+          marker.style.left = `${point[0]}px`;
+          marker.style.top = `${point[1]}px`;
+          marker.hidden = false;
+        }
+        markerRaf = requestAnimationFrame(syncMarker);
+      };
+
+      const startMarker = (lngLat) => {
+        markerLngLat = lngLat;
+        marker.hidden = false;
+        if (!markerRaf) markerRaf = requestAnimationFrame(syncMarker);
+      };
+
+      const closeMeta = () => {
+        meta.hidden = true;
+        marker.hidden = true;
+        markerLngLat = null;
+        state.selected = null;
+        document.body.classList.remove("meta-open");
+      };
+
+      const openMeta = (rawProps, lngLat) => {
+        const props = publicProps(rawProps);
+        const colour = SUBJECT_COLOURS[props.photo_subject] || "#888888";
+        const rows = displayRows(props)
+          .map(([, label, value]) => {
+            const cls = label === "Latitude" || label === "Longitude" ? "num" : "";
+            return `<div class="row"><dt>${escapeHtml(label)}</dt><dd class="${cls}">${escapeHtml(value)}</dd></div>`;
+          })
+          .join("");
+
+        const photo = hasValue(props.file_name)
+          ? `<figure><img src="photos/${encodeURIComponent(props.file_name)}.jpg" alt="${escapeHtml(props.place_name || props.file_name)}" loading="lazy" /><figcaption>${escapeHtml(props.place_name || "Field photograph")}</figcaption></figure>`
+          : "";
+
+        metaTitle.textContent = props.place_name || "Record";
+        // Photo no., box and other working identifiers are intentionally not
+        // shown anywhere in the record panel.
+        metaEyebrow.hidden = true;
+        metaBody.innerHTML = `${photo}
+          <p class="subject"><span class="swatch" style="background:${colour}"></span>${escapeHtml(props.photo_subject || "unclassified")}</p>
+          <dl>${rows}</dl>`;
+
+        const img = metaBody.querySelector("img");
+        if (img) {
+          img.addEventListener("error", () => {
+            const note = document.createElement("p");
+            note.textContent = "Photograph could not load. Check the photos folder and filename case.";
+            img.replaceWith(note);
+            report("Photograph failed: " + img.src);
+          });
+        }
+
+        meta.hidden = false;
+        document.body.classList.add("meta-open");
+        state.selected = props.file_name;
+        metaBody.scrollTop = 0;
+
+        if (lngLat) startMarker(lngLat);
+        else marker.hidden = true;
+      };
+
+      $("meta-close").addEventListener("click", closeMeta);
+
+      mapEl.addEventListener("click", (event) => {
+        if (overWidget(event)) return;
+        const props = pickAt(event.clientX, event.clientY, 10);
+        if (!props) return;
+        const lngLat = [props.photographer_longitude, props.photographer_latitude].map(Number);
+        openMeta(props, lngLat.every(Number.isFinite) ? lngLat : null);
+        hideHover();
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (state.panelOpen) setPanelOpen(false);
+        else closeMeta();
+      });
+
+      /* ---------------- initial state ---------------- */
+
+      // Open-map basemap and points are on from the markup; every
+      // panel-managed imagery layer starts hidden and neither mode is active.
+      applyLayers();
+      measureCredit();
+
+      const slot = creditSlot();
+      if (slot) new ResizeObserver(measureCredit).observe(slot);
+      window.addEventListener("resize", measureCredit);
+      mapEl.addEventListener("om-map-ready", measureCredit);
+    </script>
+  </body>
+</html>
