@@ -1,74 +1,178 @@
-/* Leaflet migration of the supplied archive. No OnlyMap runtime is used. */
-(() => {
+(async () => {
   "use strict";
-  const status = document.getElementById("map-status");
-  const errors = document.getElementById("map-errors");
-  const report = (message, error) => {
-    console.error(message, error || "");
-    errors.hidden = false;
-    const line = document.createElement("div");
-    line.textContent = message + (error ? ": " + error.message : "");
-    errors.append(line);
-  };
-  if (!window.L) { report("Leaflet could not load. Check the CDN request and your internet connection."); return; }
-  const featureData = JSON.parse(document.getElementById("archive-points").textContent);
-  const mapNode = document.getElementById("map");
-  const map = L.map(mapNode, { zoomControl: false }).setView([22.329037,113.981440],11.07);
-  L.control.zoom({ position: "bottomleft" }).addTo(map);
-  L.control.scale({ position: "bottomleft", imperial: false }).addTo(map);
+  const statusEl = document.getElementById("map-status");
+  let statusTimer;
+  function status(text, error = false) {
+    clearTimeout(statusTimer);
+    statusEl.hidden = false;
+    statusEl.textContent = text;
+    statusEl.style.borderColor = error ? "#a33" : "#aaa";
+    if (error) console.error(text);
+    else statusTimer = setTimeout(() => { statusEl.hidden = true; }, 7000);
+  }
+  async function dependency(urls, available) {
+    if (available()) return;
+    let last;
+    for (const url of urls) {
+      try {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          const timer = setTimeout(() => {
+            script.remove(); reject(new Error("Timed out loading " + url));
+          }, 25000);
+          script.src = url;
+          script.onload = () => { clearTimeout(timer); resolve(); };
+          script.onerror = () => { clearTimeout(timer); script.remove(); reject(new Error("Could not load " + url)); };
+          document.head.append(script);
+        });
+        if (!available()) throw new Error("Library did not initialise: " + url);
+        return;
+      } catch (error) { last = error; }
+    }
+    throw last;
+  }
+  await dependency([
+    "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
+    "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"
+  ], () => !!window.L);
+  const archive = window.ARCHIVE_DATA;
+  if (!archive?.points?.features || !archive?.imagery) throw new Error("archive-data.js is missing or invalid.");
+  const mapEl = document.getElementById("map");
+  const map = L.map(mapEl, { zoomControl: false }).setView([22.329037,113.981440],11.07);
+  window.archiveMap = map;
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
+  L.control.zoom({position:"bottomleft"}).addTo(map);
+  L.control.scale({position:"bottomleft",imperial:false}).addTo(map);
   map.createPane("archivePoints");
-  map.getPane("archivePoints").style.zIndex = 620;
-  map.createPane("archiveLabels");
-  map.getPane("archiveLabels").style.zIndex = 630;
-  map.getPane("archiveLabels").style.pointerEvents = "none";
+  map.getPane("archivePoints").style.zIndex = "600";
   const colours = { architecture:"#a6cee3", cemetery:"#d1d86d", "home altar":"#b2df8a", landscape:"#e3a6e1", shrine:"#e3caa6", village:"#7793ce" };
-  const safe = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  const pointGroup = L.geoJSON(featureData, {
-    pane: "archivePoints",
-    pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
-      pane:"archivePoints", radius:4.5, weight:1, color:"#232323", fillOpacity:1,
-      fillColor:colours[feature.properties.photo_subject] || "#d45aab"
+  const pointLayer = L.geoJSON(archive.points, {
+    pane:"archivePoints",
+    pointToLayer: (feature,latlng) => L.circleMarker(latlng, {
+      pane:"archivePoints",radius:5,color:"#232323",weight:1,
+      fillColor:colours[feature.properties?.photo_subject] || "#d45aab",
+      fillOpacity:1
     })
   }).addTo(map);
-  const labels = L.layerGroup();
-  for (const feature of featureData.features) {
-    const [lng,lat] = feature.geometry.coordinates;
-    L.marker([lat,lng], { pane:"archiveLabels", interactive:false,
-      icon:L.divIcon({ className:"archive-label", html:safe(feature.properties.place_name || ""), iconSize:null, iconAnchor:[0,16] })
-    }).addTo(labels);
-  }
-  const updateLabels = () => {
-    if (map.getZoom() >= 18) { if (!map.hasLayer(labels)) labels.addTo(map); }
-    else if (map.hasLayer(labels)) map.removeLayer(labels);
+  // Compatibility surface for the preserved interface controller.
+  mapEl.project = coords => {
+    const p = map.latLngToContainerPoint([coords[1],coords[0]]);
+    const rect = mapEl.getBoundingClientRect();
+    return [p.x+rect.left,p.y+rect.top];
   };
-  map.on("zoomend", updateLabels);
-  const projectedFeatures = () => featureData.features.map(feature => {
-    const [lng,lat] = feature.geometry.coordinates;
-    return { feature, pixel:map.latLngToContainerPoint([lat,lng]) };
-  });
-  // Adapter retains the supplied hover, metadata and selected-marker interface.
-  const mapEl = {
-    getBoundingClientRect: () => mapNode.getBoundingClientRect(),
-    addEventListener: (...args) => mapNode.addEventListener(...args),
-    project: ([lng,lat]) => {
-      const p = map.latLngToContainerPoint([lat,lng]);
-      const r = mapNode.getBoundingClientRect();
-      return [p.x+r.left,p.y+r.top];
-    },
-    pickAt: ([x,y], { radius=10 }={}) => {
-      let nearest = null, distance = radius * radius;
-      for (const item of projectedFeatures()) {
-        const d = (item.pixel.x-x)**2 + (item.pixel.y-y)**2;
-        if (d <= distance) { distance=d; nearest=item.feature; }
-      }
-      return nearest ? { layerId:"B05_sheet_3c4d874a_b942_4d3a_a0b6_94ff73568ed8", object:nearest } : null;
+  mapEl.pickAt = (pixel,options={}) => {
+    let best = null, distance = Math.max(options.radius || 6, 6);
+    for (const feature of archive.points.features) {
+      const c = feature.geometry?.coordinates;
+      if (!c) continue;
+      const p = map.latLngToContainerPoint([c[1],c[0]]);
+      const d = Math.hypot(p.x-pixel[0],p.y-pixel[1]);
+      if (d <= distance) { best=feature; distance=d; }
     }
+    return best ? { layerId:"B05_sheet_3c4d874a_b942_4d3a_a0b6_94ff73568ed8",object:best } : null;
   };
-  window.archiveMap = map;
+  const escapeLabel = text => String(text).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  pointLayer.eachLayer(layer => {
+    const text = layer.feature.properties?.place_name;
+    if (text) layer.bindTooltip(escapeLabel(text),{permanent:true,direction:"top",className:"archive-point-label",opacity:.85});
+  });
+  const labels = () => pointLayer.eachLayer(layer => {
+    const tip=layer.getTooltip();
+    if(tip) { if(map.getZoom()>=18) layer.openTooltip(); else layer.closeTooltip(); }
+  });
+  map.on("zoomend",labels); labels();
+  // All TIFFs are lazy-loaded only after a user activates them.
+  let rasterDependencies;
+  function rasterReady() {
+    if (!rasterDependencies) rasterDependencies=(async()=>{
+      await dependency(["https://unpkg.com/georaster","https://cdn.jsdelivr.net/npm/georaster"],()=>typeof window.parseGeoraster==="function");
+      await dependency(["https://unpkg.com/proj4","https://cdn.jsdelivr.net/npm/proj4"],()=>typeof window.proj4==="function");
+      proj4.defs("EPSG:2326", "+proj=tmerc +lat_0=22.3121333333333 +lon_0=114.178555555556 +k=1 +x_0=836694.05 +y_0=819069.8 +ellps=intl +towgs84=-162.619,-276.959,-161.764,-0.067753,2.243648,1.158828,-1.094246 +units=m +no_defs");
+      await dependency(["https://unpkg.com/georaster-layer-for-leaflet/dist/georaster-layer-for-leaflet.min.js","https://cdn.jsdelivr.net/npm/georaster-layer-for-leaflet/dist/georaster-layer-for-leaflet.min.js"],()=>typeof window.GeoRasterLayer==="function");
+    })().catch(error=>{rasterDependencies=null;throw error;});
+    return rasterDependencies;
+  }
+  const rasterRecords = new Map();
+  archive.imagery.forEach((entry,index)=>{
+    const pane="archiveRaster"+index;
+    map.createPane(pane);
+    map.getPane(pane).style.zIndex=String(250+index);
+    map.getPane(pane).style.pointerEvents="none";
+    const rec={...entry,pane,on:false,opacity:1,layer:null,pending:null,touched:0};
+    rec.getAttribute = key => key==="visible" ? String(rec.on) : key==="opacity" ? String(rec.opacity) : rec[key];
+    rec.setAttribute = (key,value) => {
+      if(key==="opacity") {
+        rec.opacity=Number(value);
+        rec.layer?.setOpacity(rec.opacity);
+      }
+      if(key==="visible") {
+        rec.on=value==="true";
+        if(rec.on) activateRaster(rec);
+        else if(rec.layer && map.hasLayer(rec.layer)) map.removeLayer(rec.layer);
+      }
+    };
+    rasterRecords.set(entry.id,rec);
+  });
+  let serial=Promise.resolve();
+  async function activateRaster(rec) {
+    rec.touched=Date.now();
+    if(rec.layer) { if(rec.on && !map.hasLayer(rec.layer)) rec.layer.setOpacity(rec.opacity).addTo(map); return; }
+    if(rec.pending) return rec.pending;
+    rec.pending=serial.then(async()=>{
+      if(!rec.on) return;
+      status("Loading imagery: "+rec.label+" …");
+      await rasterReady();
+      const url=new URL(rec.src,document.baseURI).href;
+      let raster;
+      try { raster=await parseGeoraster(url); }
+      catch(streamError) {
+        console.warn("Retrying full TIFF download",rec.src,streamError);
+        const response=await fetch(url);
+        if(!response.ok) throw new Error("HTTP "+response.status+": "+url);
+        raster=await parseGeoraster(await response.arrayBuffer());
+      }
+      if(!raster.projection) throw new Error("Missing TIFF CRS: "+rec.src+". Supply a georeferenced TIFF; no CRS will be guessed.");
+      const projection=String(raster.projection);
+      const code=projection.replace(/^EPSG:/i,"");
+      if(/^\d+$/.test(code) && !proj4.defs("EPSG:"+code)) {
+        const response=await fetch("https://epsg.io/"+code+".proj4");
+        if(!response.ok) throw new Error("Cannot resolve EPSG:"+code);
+        const definition=(await response.text()).trim();
+        if(!definition.includes("+proj=")) throw new Error("Invalid projection definition for EPSG:"+code);
+        proj4.defs("EPSG:"+code,definition);
+      }
+      rec.layer=new GeoRasterLayer({
+        georaster:raster,proj4:window.proj4,pane:rec.pane,
+        opacity:rec.opacity,resolution:128,debugLevel:0,
+        keepBuffer:1,updateWhenIdle:true
+      });
+      const bounds=rec.layer.getBounds();
+      if(!bounds?.isValid()) throw new Error("Invalid geographic bounds: "+rec.src);
+      if(rec.on) rec.layer.addTo(map);
+      console.info("Archive imagery ready", {file:rec.src,projection:raster.projection,bands:raster.numberOfRasters,bounds:bounds.toBBoxString()});
+      status("Loaded: "+rec.label);
+      // Release older hidden raster layers; active Compare layers are never capped.
+      const hidden=[...rasterRecords.values()].filter(r=>r.layer&&!r.on).sort((a,b)=>b.touched-a.touched);
+      hidden.slice(1).forEach(r=>{r.layer.remove();r.layer=null;});
+    }).catch(error=>{
+      rec.layer?.remove(); rec.layer=null;
+      status("Could not display "+rec.label+"\n"+error.message+"\nUncheck and recheck to retry. See Console for details.",true);
+      console.error("Raster failure",rec.src,error);
+    }).finally(()=>{rec.pending=null;});
+    serial=rec.pending.catch(()=>{});
+    return rec.pending;
+  }
+  // Stop UI gestures reaching the map; do not disable scrolling inside panels.
+  for(const id of ["controls","meta"]) {
+    const el=document.getElementById(id);
+    L.DomEvent.disableClickPropagation(el);
+    L.DomEvent.disableScrollPropagation(el);
+  }
+  window.addEventListener("resize",()=>map.invalidateSize());
+
       // Layer ids exactly as exported from QGIS2WebMap.
       const POINTS = "B05_sheet_3c4d874a_b942_4d3a_a0b6_94ff73568ed8";
 
@@ -202,7 +306,7 @@
       };
 
       const $ = (id) => document.getElementById(id);
-
+      const layerEl = (id) => rasterRecords.get(id);
 
       const state = {
         // "timeline" | "compare" | null (mutually exclusive)
@@ -218,89 +322,35 @@
 
       /* ---------------- layer control ---------------- */
 
-
-      const SOURCES = {
-  "T1200_190SE_D_196801_modified_22cd3a28_97da_4b43_9a88_708e829d66c5": "layer-1-t1200_190se_d_196801_modified_22cd3a28_97da_4b43.tif",
-  "T1200_207NE_B_196802_modified_03bddc70_106b_45e1_8e3e_c5ef396adb34": "layer-2-t1200_207ne_b_196802_modified_03bddc70_106b_45e1.tif",
-  "T1200_190SE_D_197812_modified_4ceb8c13_093f_4108_86c5_91a707ad402d": "layer-3-t1200_190se_d_197812_modified_4ceb8c13_093f_4108.tif",
-  "T1200_207NE_B_197807_modified_32265cf2_66bb_40a3_b678_0b08c510cfad": "layer-4-t1200_207ne_b_197807_modified_32265cf2_66bb_40a3.tif",
-  "HP1C_09SE13A_198704_modified_6b95ddb4_348f_49ba_8944_0f3be54c6dd5": "layer-5-hp1c_09se13a_198704_modified_6b95ddb4_348f_49ba_.tif",
-  "HP1C_09SE13A_199805_modified_c9110147_e67c_439f_8902_0d509720c0b7": "layer-6-hp1c_09se13a_199805_modified_c9110147_e67c_439f_.tif",
-  "HP1C_09SE13A_200803_modified_e43825a2_0ba4_43d2_9692_35abd8dc42e8": "layer-7-hp1c_09se13a_200803_modified_e43825a2_0ba4_43d2_.tif",
-  "HP1C_09SE13C_198709_modified_8e0f284f_90e1_44c1_bbc5_c9f937528cc8": "layer-8-hp1c_09se13c_198709_modified_8e0f284f_90e1_44c1_.tif",
-  "HP1C_09SE13C_199910_modified_8bce7e8d_9809_4fbd_9e06_7fa580a74597": "layer-9-hp1c_09se13c_199910_modified_8bce7e8d_9809_4fbd_.tif",
-  "HP1C_09SE13C_200801_modified_367a29c2_5cde_49c2_9229_2146827a1922": "layer-10-hp1c_09se13c_200801_modified_367a29c2_5cde_49c2_.tif",
-  "SE9A_2026": "layer-11-9se_a_2026.tif",
-  "SE9C_2026": "layer-12-9se_c_2026.tif"
-};
-      const desired = new Map();
-      const rasters = new Map();
-      const loading = new Map();
-      let queue = Promise.resolve();
-      const loadingNames = new Set();
-      function showLoading() {
-        status.hidden = !loadingNames.size;
-        status.textContent = loadingNames.size ? "Loading imagery: " + [...loadingNames].join(", ") : "";
-      }
-      function ensureRaster(id) {
-        if (rasters.has(id)) return Promise.resolve(rasters.get(id));
-        if (loading.has(id)) return loading.get(id);
-        const task = queue.catch(() => {}).then(async () => {
-          if (!desired.get(id)?.on) return null;
-          if (!window.parseGeoraster || !window.GeoRasterLayer) throw new Error("GeoTIFF display dependencies did not load.");
-          const entry = IMAGERY.find(item => item.id === id);
-          loadingNames.add(entry.label); showLoading();
-          try {
-            const url = new URL(SOURCES[id], document.baseURI).href;
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
-            const buffer = await response.arrayBuffer();
-            const raster = await parseGeoraster(buffer);
-            const paneName = "imagery-" + IMAGERY.findIndex(item => item.id === id);
-            if (!map.getPane(paneName)) map.createPane(paneName);
-            map.getPane(paneName).style.zIndex = String(300 + IMAGERY.findIndex(item => item.id === id));
-            map.getPane(paneName).style.pointerEvents = "none";
-            const layer = new GeoRasterLayer({
-              georaster:raster, pane:paneName, opacity:desired.get(id)?.opacity ?? 1,
-              resolution:128, keepBuffer:2, updateWhenIdle:true
-            });
-            if (typeof layer.isSupportedProjection === "function" && !layer.isSupportedProjection())
-              throw new Error(`Unsupported raster projection: ${raster.projection}. Reproject this TIFF in QGIS or provide its CRS definition.`);
-            layer.on("tileerror", event => report("Tile rendering failed: " + entry.label, event.error));
-            rasters.set(id, layer);
-            const current = desired.get(id);
-            if (current?.on) { layer.setOpacity(current.opacity); layer.addTo(map); }
-            return layer;
-          } finally { loadingNames.delete(entry.label); showLoading(); }
-        });
-        queue = task.catch(() => {});
-        loading.set(id, task);
-        task.catch(error => report("Could not display " + (IMAGERY.find(item => item.id === id)?.label || id), error))
-          .finally(() => loading.delete(id));
-        return task;
-      }
       const setVisible = (id, on) => {
-        const current = desired.get(id) || { on:false, opacity:1 };
-        current.on=on; desired.set(id,current);
-        const layer=rasters.get(id);
-        if (!on) { if (layer && map.hasLayer(layer)) map.removeLayer(layer); }
-        else if (layer) { layer.setOpacity(current.opacity); if (!map.hasLayer(layer)) layer.addTo(map); }
-        else ensureRaster(id);
+        const el = layerEl(id);
+        if (!el) return;
+        const want = on ? "true" : "false";
+        if (el.getAttribute("visible") !== want) el.setAttribute("visible", want);
       };
+
       const setOpacity = (id, value) => {
-        const current=desired.get(id) || { on:false, opacity:1 };
-        current.opacity=value; desired.set(id,current);
-        rasters.get(id)?.setOpacity(value);
+        const el = layerEl(id);
+        if (!el) return;
+        const want = String(Math.round(value * 1000) / 1000);
+        if (el.getAttribute("opacity") !== want) el.setAttribute("opacity", want);
       };
+
+      // The single source of truth for which imagery is on screen. The open-map
+      // basemap ("osm") is permanent and is never touched here; points and
+      // overlays are never touched either. Stacking order is fixed by the
+      // order of the om-layer elements in the markup, so it never depends on
+      // the order in which layers are switched on.
       const applyLayers = () => {
-        const active=new Set(state.mode === "timeline" ? PERIODS[state.period].layers : []);
-        for (const {id} of IMAGERY) {
+        const active = new Set(state.mode === "timeline" ? PERIODS[state.period].layers : []);
+        for (const { id } of IMAGERY) {
           const saved=state.compare.get(id);
-          const on=state.mode === "timeline" ? active.has(id) : state.mode === "compare" && !!saved.on;
-          setOpacity(id,state.mode === "timeline" ? state.tlOpacity : saved.opacity);
+          const on=state.mode === "timeline" ? active.has(id) : state.mode === "compare" && !!saved?.on;
+          if(on) setOpacity(id,state.mode === "timeline" ? state.tlOpacity : saved.opacity);
           setVisible(id,!!on);
         }
       };
+
       /* ---------------- credits ---------------- */
 
       const creditSlot = () => document.querySelector(".leaflet-control-attribution");
@@ -382,7 +432,7 @@
         if (opacityRaf) return;
         opacityRaf = requestAnimationFrame(() => {
           opacityRaf = 0;
-          if (state.mode === "timeline") for (const id of PERIODS[state.period].layers) setOpacity(id, state.tlOpacity);
+          if(state.mode === "timeline") for (const id of PERIODS[state.period].layers) setOpacity(id, state.tlOpacity);
         });
       });
 
@@ -424,7 +474,7 @@
         const pct = document.createElement("span");
         pct.className = "cmp-pct";
         pct.textContent = "100%";
-        let compareRaf = 0;
+        let compareRaf=0;
         range.addEventListener("input", () => {
           saved.opacity = Number(range.value) / 100;
           pct.textContent = `${range.value}%`;
@@ -432,7 +482,7 @@
           if (compareRaf) return;
           compareRaf = requestAnimationFrame(() => {
             compareRaf = 0;
-            if (state.mode === "compare" && saved.on) setOpacity(id, saved.opacity);
+            if(state.mode === "compare" && saved.on) setOpacity(id, saved.opacity);
           });
         });
         op.append(range, pct);
@@ -467,7 +517,7 @@
       };
 
       const overWidget = (event) =>
-        event.composedPath().some((node) => node instanceof Element && !!node.closest(".leaflet-control"));
+        event.composedPath().some((node) => node && node.tagName === "OM-WIDGET");
 
       const escapeHtml = (value) =>
         String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -521,6 +571,7 @@
       });
 
       mapEl.addEventListener("pointerleave", hideHover);
+      map.on("movestart",hideHover);
 
       /* ---------------- metadata panel ---------------- */
 
@@ -585,10 +636,10 @@
         const img = metaBody.querySelector("img");
         if (img) {
           img.addEventListener("error", () => {
-            const note = document.createElement("p");
-            note.textContent = "Photograph unavailable. Check photos/ and filename case.";
+            const note=document.createElement("p");
+            note.textContent="Photograph unavailable. Check the photos folder and filename case.";
             img.replaceWith(note);
-            console.warn("Photograph failed:", img.src);
+            console.warn("Photo failed:",img.src);
           });
         }
 
@@ -603,10 +654,7 @@
 
       $("meta-close").addEventListener("click", closeMeta);
 
-      let movedAt = 0;
-      map.on("dragend", () => { movedAt=Date.now(); hideHover(); });
       mapEl.addEventListener("click", (event) => {
-        if (Date.now()-movedAt < 200) return;
         if (overWidget(event)) return;
         const props = pickAt(event.clientX, event.clientY, 10);
         if (!props) return;
@@ -631,23 +679,12 @@
       const slot = creditSlot();
       if (slot) new ResizeObserver(measureCredit).observe(slot);
       window.addEventListener("resize", measureCredit);
-      mapEl.addEventListener("om-map-ready", measureCredit);
+      map.whenReady(measureCredit);
     
-      for (const el of [document.getElementById("controls"), document.getElementById("meta")]) {
-        L.DomEvent.disableClickPropagation(el);
-        L.DomEvent.disableScrollPropagation(el);
-      }
-      const pointButton=L.control({position:"bottomleft"});
-      pointButton.onAdd=() => {
-        const button=L.DomUtil.create("button","archive-locate");
-        button.type="button"; button.textContent="View archive points";
-        button.title="Zoom to the 25 supplied photo locations";
-        L.DomEvent.disableClickPropagation(button);
-        button.addEventListener("click",() => map.fitBounds(pointGroup.getBounds(),{padding:[45,45],maxZoom:18}));
-        return button;
-      };
-      pointButton.addTo(map);
-      updateLabels();
-      window.archiveDiagnostics = () => ({ engine:"Leaflet", points:featureData.features.length,
-        imagery:IMAGERY.map(item => ({name:item.label,source:SOURCES[item.id],...desired.get(item.id),loaded:rasters.has(item.id)})) });
-})();
+  // A diagnostic helper: call archiveFitPoints() in Console to locate all records.
+  window.archiveFitPoints=()=>map.fitBounds(pointLayer.getBounds(),{padding:[40,40],maxZoom:18});
+})().catch(error=>{
+  console.error("Archive startup failed",error);
+  const el=document.getElementById("map-status");
+  if(el){el.hidden=false;el.textContent="Map startup failed: "+error.message+". Check network access and the browser Console.";}
+});

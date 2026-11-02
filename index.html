@@ -1,0 +1,730 @@
+<!doctype html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>1992 Tung Chung Valley Archives</title>
+
+
+
+    <style>
+      :root {
+        --ink: #0c0e26;
+        --ink-soft: rgba(12, 14, 38, 0.66);
+        --ink-faint: rgba(12, 14, 38, 0.42);
+        --line: rgba(12, 14, 38, 0.42);
+        --line-soft: rgba(12, 14, 38, 0.16);
+        --panel: rgba(255, 255, 255, 0.35);
+        --panel-solid: rgba(255, 255, 255, 0.82);
+        --type-title: "American Typewriter", "Courier Prime", "Courier New", Courier, monospace;
+        --type-ui: "Courier New", Courier, "American Typewriter", monospace;
+        --credit-h: 46px;
+        --meta-w: 340px;
+      }
+
+      * { box-sizing: border-box; }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #e7e3da;
+      }
+
+      body {
+        font-family: var(--type-ui);
+        color: var(--ink);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* The map fills the viewport and owns its own stacking context, so the
+         interface below always sits above the map's internal widgets. */
+      #map {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        display: block;
+      }
+
+      /* ---------- title (caption block emitted by the export) ---------- */
+
+      .om-caption {
+        position: fixed;
+        z-index: 40;
+        pointer-events: none;
+      }
+
+      .om-caption-top-left {
+        top: 22px;
+        left: 24px;
+        max-width: min(42ch, calc(100vw - 48px));
+      }
+
+      .om-caption-title {
+        margin: 0;
+        font-family: var(--type-title);
+        font-weight: 700;
+        font-size: clamp(19px, 2.1vw, 26px);
+        line-height: 1.18;
+        letter-spacing: 0.005em;
+        color: var(--ink);
+        /* Outline on the letterforms, not on a box. paint-order keeps the
+           stroke behind the fill where it is supported; the text-shadow is
+           the fallback that does the same job without eating the glyphs. */
+        -webkit-text-stroke: 0.9px #fff;
+        paint-order: stroke fill;
+        text-shadow:
+          0 0 1px #fff,
+          0 0 2px rgba(255, 255, 255, 0.95),
+          0 1px 3px rgba(255, 255, 255, 0.7);
+        text-wrap: balance;
+      }
+
+      /* The abstract sits directly under the title: same typewriter voice,
+         quieter weight, and a soft white halo so it stays legible over both
+         the basemap and the historical imagery. */
+      .om-caption-abstract {
+        margin: 9px 0 0;
+        max-width: 46ch;
+        font-family: var(--type-ui);
+        font-size: clamp(10.5px, 0.82vw, 12px);
+        line-height: 1.62;
+        letter-spacing: 0.012em;
+        color: rgba(12, 14, 38, 0.92);
+        text-shadow:
+          0 0 2px rgba(255, 255, 255, 1),
+          0 0 4px rgba(255, 255, 255, 0.98),
+          0 1px 3px rgba(255, 255, 255, 0.9);
+        text-wrap: pretty;
+      }
+
+      /* ---------- lower-right controls ---------- */
+
+      .controls {
+        position: fixed;
+        right: 18px;
+        bottom: calc(12px + var(--credit-h));
+        z-index: 40;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 10px;
+      }
+
+      .controls-row {
+        display: flex;
+        gap: 8px;
+      }
+
+      .ctl {
+        font-family: var(--type-ui);
+        font-size: 12.5px;
+        line-height: 1;
+        letter-spacing: 0.05em;
+        color: var(--ink);
+        background: var(--panel);
+        -webkit-backdrop-filter: blur(9px) saturate(1.05);
+        backdrop-filter: blur(9px) saturate(1.05);
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        padding: 9px 13px;
+        cursor: pointer;
+      }
+
+      .ctl:hover { background: rgba(255, 255, 255, 0.6); }
+      .ctl:active { background: rgba(255, 255, 255, 0.75); }
+      .ctl[aria-expanded="true"] {
+        background: rgba(255, 255, 255, 0.78);
+        border-color: var(--ink);
+      }
+      .ctl:focus-visible,
+      .panel :focus-visible {
+        outline: 1.5px solid var(--ink);
+        outline-offset: 2px;
+      }
+
+      /* ---------- panels ---------- */
+
+      .panel {
+        width: 274px;
+        background: var(--panel);
+        -webkit-backdrop-filter: blur(11px) saturate(1.05);
+        backdrop-filter: blur(11px) saturate(1.05);
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        padding: 13px 14px 14px;
+        color: var(--ink);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .panel[hidden] { display: none; }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        padding: 0 0 8px;
+        border-bottom: 1px solid var(--line-soft);
+        font-family: var(--type-ui);
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      /* mode options (Timeline / Compare) */
+
+      .panel-sub {
+        margin: -4px 0 8px;
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        color: var(--ink-soft);
+      }
+
+      .opt {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        padding: 7px 0;
+        cursor: pointer;
+      }
+
+      .opt input {
+        appearance: none;
+        -webkit-appearance: none;
+        flex: none;
+        width: 11px;
+        height: 11px;
+        margin: 3px 0 0;
+        border: 1px solid var(--ink);
+        border-radius: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+      .opt input:checked { background: var(--ink); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9); }
+
+      .opt-name { display: block; font-size: 12px; }
+
+      .mode-block { padding-bottom: 4px; }
+      .mode-block + .mode-block { border-top: 1px dotted var(--line-soft); }
+
+      /* compare layer list */
+
+      .cmp-block { margin-top: 2px; }
+
+      .cmp-list {
+        max-height: min(42vh, 320px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        margin: 4px 0 2px;
+        padding-right: 2px;
+      }
+
+      .cmp-item {
+        padding: 6px 0;
+        border-bottom: 1px dotted var(--line-soft);
+      }
+      .cmp-item:last-child { border-bottom: 0; }
+
+      .cmp-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        cursor: pointer;
+      }
+
+      .cmp-row input {
+        appearance: none;
+        -webkit-appearance: none;
+        flex: none;
+        width: 11px;
+        height: 11px;
+        margin: 3px 0 0;
+        border: 1px solid var(--ink);
+        border-radius: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+      .cmp-row input:checked { background: var(--ink); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9); }
+
+      .cmp-name {
+        display: block;
+        font-size: 11px;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+      }
+
+      .cmp-op {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 3px 0 0 20px;
+      }
+
+      .cmp-op input[type="range"] { flex: 1; }
+      .cmp-op input[type="range"]:disabled { cursor: default; opacity: 0.35; }
+
+      .cmp-pct {
+        flex: none;
+        width: 34px;
+        text-align: right;
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+        color: var(--ink-soft);
+      }
+
+      .panel-foot {
+        margin: 10px 0 0;
+        padding-top: 8px;
+        border-top: 1px solid var(--line-soft);
+        font-size: 9.5px;
+        line-height: 1.45;
+        color: var(--ink-soft);
+      }
+
+      /* timeline */
+
+      .period-value {
+        font-family: var(--type-title);
+        font-weight: 700;
+        font-size: 17px;
+        letter-spacing: 0.03em;
+        margin: 0 0 2px;
+      }
+
+      .period-sheets {
+        margin: 0 0 8px;
+        font-size: 9.5px;
+        line-height: 1.35;
+        letter-spacing: 0.02em;
+        color: var(--ink-soft);
+      }
+
+      .slider-block { margin-bottom: 14px; }
+      .slider-block:last-of-type { margin-bottom: 0; }
+
+      .slider-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 7px;
+      }
+
+      .field-label {
+        font-size: 9.5px;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+      }
+
+      .field-value { font-size: 11px; font-variant-numeric: tabular-nums; }
+
+      input[type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+        display: block;
+        width: 100%;
+        height: 16px;
+        margin: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+      input[type="range"]::-webkit-slider-runnable-track {
+        height: 1.5px;
+        background: rgba(12, 14, 38, 0.55);
+      }
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 10px;
+        height: 15px;
+        margin-top: -7px;
+        border: 1px solid var(--ink);
+        border-radius: 1px;
+        background: #fff;
+      }
+      input[type="range"]::-moz-range-track {
+        height: 1.5px;
+        background: rgba(12, 14, 38, 0.55);
+      }
+      input[type="range"]::-moz-range-thumb {
+        width: 8px;
+        height: 13px;
+        border: 1px solid var(--ink);
+        border-radius: 1px;
+        background: #fff;
+      }
+
+      .ticks {
+        position: relative;
+        height: 13px;
+        margin-top: 3px;
+      }
+      .ticks span {
+        position: absolute;
+        top: 0;
+        transform: translateX(-50%);
+        font-size: 9px;
+        letter-spacing: 0.02em;
+        color: var(--ink-soft);
+        white-space: nowrap;
+      }
+      .ticks span:first-child { transform: translateX(-15%); }
+      .ticks span:last-child { transform: translateX(-85%); }
+
+      /* ---------- metadata panel ---------- */
+
+      .meta {
+        position: fixed;
+        right: 18px;
+        top: 92px;
+        bottom: calc(12px + var(--credit-h));
+        z-index: 35;
+        width: var(--meta-w);
+        max-width: calc(100vw - 36px);
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+        -webkit-backdrop-filter: blur(11px) saturate(1.05);
+        backdrop-filter: blur(11px) saturate(1.05);
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        color: var(--ink);
+      }
+
+      .meta[hidden] { display: none; }
+
+      .meta-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px 12px 10px 14px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .meta-eyebrow {
+        margin: 0 0 3px;
+        font-size: 9px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+      }
+
+      .meta-title {
+        margin: 0;
+        font-family: var(--type-title);
+        font-weight: 700;
+        font-size: 15px;
+        line-height: 1.25;
+      }
+
+      .meta-close {
+        flex: none;
+        margin-left: auto;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        font-family: var(--type-ui);
+        font-size: 14px;
+        line-height: 1;
+        color: var(--ink);
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 2px;
+        cursor: pointer;
+      }
+      .meta-close:hover { border-color: var(--line); }
+
+      .meta-body {
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 12px 14px 16px;
+        font-size: 11.5px;
+        line-height: 1.5;
+      }
+
+      .meta figure { margin: 0 0 13px; }
+      .meta figure img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid var(--line-soft);
+        background: rgba(255, 255, 255, 0.6);
+      }
+      .meta figcaption {
+        margin-top: 5px;
+        font-size: 9.5px;
+        line-height: 1.4;
+        color: var(--ink-soft);
+      }
+
+      .subject {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin: 0 0 12px;
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .subject .swatch {
+        width: 9px;
+        height: 9px;
+        border: 1px solid rgba(12, 14, 38, 0.35);
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 92px 1fr;
+        gap: 10px;
+        padding: 5px 0;
+        border-bottom: 1px dotted var(--line-soft);
+      }
+      .row:last-child { border-bottom: 0; }
+      .row dt {
+        margin: 0;
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        padding-top: 2px;
+      }
+      .row dd { margin: 0; overflow-wrap: anywhere; }
+      .row dd.num { font-variant-numeric: tabular-nums; }
+      .row dd.path { font-size: 10px; color: var(--ink-soft); }
+
+      /* controls move out of the metadata panel's way */
+      body.meta-open .controls { right: calc(18px + var(--meta-w) + 16px); }
+
+      /* ---------- hover card ---------- */
+
+      .hovercard {
+        position: fixed;
+        z-index: 30;
+        width: 262px;
+        max-height: min(58vh, 460px);
+        overflow: hidden;
+        padding: 9px 10px 8px;
+        background: rgba(255, 255, 255, 0.58);
+        -webkit-backdrop-filter: blur(8px) saturate(1.05);
+        backdrop-filter: blur(8px) saturate(1.05);
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        color: var(--ink);
+        font-size: 10.5px;
+        line-height: 1.42;
+        pointer-events: none;
+      }
+      .hovercard[hidden] { display: none; }
+
+      .hovercard h3 {
+        margin: 0 0 5px;
+        font-family: var(--type-title);
+        font-weight: 700;
+        font-size: 12px;
+        line-height: 1.25;
+      }
+      .hovercard .hc-row {
+        display: grid;
+        grid-template-columns: 78px 1fr;
+        gap: 7px;
+        padding: 1.5px 0;
+      }
+      .hovercard .hc-label {
+        font-size: 8.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        padding-top: 1.5px;
+      }
+      .hovercard .hc-value { overflow-wrap: anywhere; }
+      .hovercard .hc-foot {
+        margin: 5px 0 0;
+        padding-top: 4px;
+        border-top: 1px solid var(--line-soft);
+        font-size: 8.5px;
+        letter-spacing: 0.04em;
+        color: var(--ink-soft);
+      }
+
+      /* ---------- selected point marker ---------- */
+
+      #marker {
+        position: fixed;
+        left: 0;
+        top: 0;
+        z-index: 20;
+        width: 19px;
+        height: 19px;
+        margin: -9.5px 0 0 -9.5px;
+        border: 1.5px solid var(--ink);
+        border-radius: 50%;
+        box-shadow:
+          0 0 0 1.5px rgba(255, 255, 255, 0.92),
+          inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+        pointer-events: none;
+      }
+      #marker[hidden] { display: none; }
+
+      /* ---------- required credits ---------- */
+
+      .om-credit {
+        position: fixed;
+        left: 18px;
+        bottom: calc(12px + var(--credit-h) + 96px);
+        z-index: 5;
+        max-width: min(24rem, calc(100% - 36px));
+        padding: 3px 6px;
+        border: 1px solid var(--line-soft);
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.55);
+        font-size: 10px;
+        line-height: 1.45;
+        color: var(--ink-soft);
+      }
+      .om-credit a { color: var(--ink); }
+      .om-credit-mark { display: none; }
+      body:has([data-om-badge]) .om-credit { display: none; }
+
+      /* Provider attribution sits above the lower-right controls. */
+      [data-om-widget-slot="bottom-end"] { bottom: 12px !important; }
+
+      /* ---------- responsive ---------- */
+
+      @media (max-width: 900px) {
+        :root { --meta-w: 100%; }
+        body.meta-open .controls { right: 18px; }
+        body.meta-open .controls,
+        body.meta-open .hovercard { display: none; }
+      }
+
+      @media (max-width: 900px) {
+        .meta {
+          left: 12px;
+          right: 12px;
+          top: auto;
+          bottom: 12px;
+          width: auto;
+          max-width: none;
+          max-height: 58vh;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .om-caption-top-left { top: 14px; left: 14px; max-width: calc(100vw - 28px); }
+        .om-caption-title { font-size: 18px; }
+        .om-caption-abstract { margin-top: 7px; font-size: 10.5px; line-height: 1.5; max-width: 34ch; }
+        .controls { right: 12px; bottom: calc(10px + var(--credit-h)); }
+        .panel { width: min(274px, calc(100vw - 24px)); }
+        .meta { top: auto; bottom: 12px; max-height: 62vh; }
+        .hovercard { display: none; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { transition: none !important; animation: none !important; }
+      }
+
+      @media print {
+        .controls, .hovercard, .meta-close { display: none !important; }
+      }
+    </style>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+      #map { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
+      #map-status { position:fixed;left:16px;bottom:100px;z-index:50;max-width:min(480px,85vw);max-height:25vh;overflow:auto;padding:9px 12px;background:rgba(255,255,255,.94);color:#0c0e26;border:1px solid #aaa;font:12px/1.5 "Courier New",monospace;white-space:pre-wrap; }
+      #map-status[hidden] { display:none; }
+      .leaflet-container { background:#eeebe4; font-family:"Courier New",monospace; }
+      .archive-point-label { border:1px solid #bbb; background:rgba(255,255,255,.8); color:#323232;box-shadow:none; }
+      .leaflet-control-attribution { max-width:min(65vw,650px); }
+      :root { --credit-h: 40px; }
+    </style>
+  </head>
+
+  <body>
+    <div id="map" aria-label="Tung Chung Valley archive map"></div>
+    <div id="map-status" role="status" hidden></div>
+
+    <div class="om-caption om-caption-top-left">
+      <div class="om-caption-title">1992 Tung Chung Valley Archives</div>
+      <p class="om-caption-abstract">With the Rose Garden Project — the building of the new airport at Chek Lap Kok — under way, the development of Tung Chung New Town was also placed on the agenda, and the Government commissioned the Department of Anthropology of The Chinese University of Hong Kong to carry out large-scale ethnographic research in the Tung Chung Valley around 1992.</p>
+    </div>
+
+    <aside class="meta" id="meta" hidden aria-label="Record details">
+      <div class="meta-head">
+        <div>
+          <p class="meta-eyebrow" id="meta-eyebrow">Record</p>
+          <h2 class="meta-title" id="meta-title"></h2>
+        </div>
+        <button class="meta-close" id="meta-close" type="button" aria-label="Close record details">&#10005;</button>
+      </div>
+      <div class="meta-body" id="meta-body"></div>
+    </aside>
+
+    <div class="hovercard" id="hovercard" hidden aria-hidden="true"></div>
+    <div id="marker" hidden></div>
+
+    <div class="controls" id="controls">
+      <section class="panel panel-layers" id="panel-layers" hidden aria-label="Map layers">
+        <h2>Map Layers</h2>
+        <p class="panel-sub">Spatial and Topographic Images</p>
+
+        <div class="mode-block">
+          <label class="opt mode">
+            <input type="checkbox" id="mode-timeline" />
+            <span class="opt-name">Timeline</span>
+          </label>
+
+          <div class="tl-block" id="tl-block" hidden>
+            <div class="slider-block">
+              <p class="period-value" id="period-value">1968</p>
+              <p class="period-sheets" id="period-sheets"></p>
+              <div class="slider-head">
+                <span class="field-label">Imagery period</span>
+              </div>
+              <input type="range" id="period" min="0" max="4" step="1" value="0"
+                     aria-label="Historical imagery period" />
+              <div class="ticks" aria-hidden="true">
+                <span style="left: 2%">1968</span>
+                <span style="left: 26%">1978</span>
+                <span style="left: 50%">1998&#8211;99</span>
+                <span style="left: 74%">2008</span>
+                <span style="left: 98%">2026</span>
+              </div>
+            </div>
+
+            <div class="slider-block">
+              <div class="slider-head">
+                <label class="field-label" for="opacity">Imagery opacity</label>
+                <span class="field-value" id="opacity-value">100%</span>
+              </div>
+              <input type="range" id="opacity" min="0" max="100" step="1" value="100"
+                     aria-label="Timeline imagery opacity" />
+            </div>
+          </div>
+        </div>
+
+        <div class="mode-block">
+          <label class="opt mode">
+            <input type="checkbox" id="mode-compare" />
+            <span class="opt-name">Compare</span>
+          </label>
+
+          <div class="cmp-block" id="cmp-block" hidden>
+            <div class="cmp-list" id="cmp-list" role="group" aria-label="Imagery layers"></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="controls-row">
+        <button class="ctl" id="btn-layers" type="button" aria-expanded="false" aria-controls="panel-layers">Map Layers</button>
+      </div>
+    </div>
+
+
+
+    <script src="./archive-data.js?v=leaflet-1"></script>
+    <script src="./map-app.js?v=leaflet-1"></script>
+  </body>
+</html>
