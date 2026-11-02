@@ -1,0 +1,1433 @@
+<!doctype html>
+<!--
+  1992 Tung Chung Valley Archives - archival map interface.
+
+  Built on the QGIS2WebMap / OnlyMap export it replaces: same runtime
+  (onlymap.js), same layers, same feature data. Only the interface around
+  the map was redesigned. The original export is kept in
+  _original_export/index.qgis-export.html.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>1992 Tung Chung Valley Archives</title>
+
+    <style>
+      /* Runtime fallback styling, unchanged from the export. */
+      om-map:not(:defined) {
+        display: block;
+        position: relative;
+        min-height: 240px;
+        background: #eeebe4;
+        color: #0c0e26;
+        font: 14px/1.5 "Courier New", Courier, monospace;
+      }
+      om-map:not(:defined) > :not(om-fallback) { display: none !important; }
+      om-fallback { display: none; }
+      om-map:not(:defined) > om-fallback {
+        display: grid;
+        place-content: center;
+        position: absolute;
+        inset: 0;
+        padding: 24px;
+        text-align: center;
+      }
+      om-map:not(:defined):before {
+        content: "This interactive map requires JavaScript. Open this file from a web server in a modern browser.";
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-content: center;
+        max-width: 36em;
+        margin: 0 auto;
+        padding: 24px;
+        text-align: center;
+      }
+      om-map:not(:defined):has(> om-fallback):before { content: "none"; }
+    </style>
+
+    <style>
+      :root {
+        --ink: #0c0e26;
+        --ink-soft: rgba(12, 14, 38, 0.66);
+        --ink-faint: rgba(12, 14, 38, 0.42);
+        --line: rgba(12, 14, 38, 0.42);
+        --line-soft: rgba(12, 14, 38, 0.16);
+        --panel: rgba(255, 255, 255, 0.35);
+        --panel-solid: rgba(255, 255, 255, 0.82);
+        --type-title: "American Typewriter", "Courier Prime", "Courier New", Courier, monospace;
+        --type-ui: "Courier New", Courier, "American Typewriter", monospace;
+        --credit-h: 46px;
+        --meta-w: 340px;
+      }
+
+      * { box-sizing: border-box; }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #e7e3da;
+      }
+
+      body {
+        font-family: var(--type-ui);
+        color: var(--ink);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* The map fills the viewport and owns its own stacking context, so the
+         interface below always sits above the map's internal widgets. */
+      om-map {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        display: block;
+      }
+
+      /* ---------- title (caption block emitted by the export) ---------- */
+
+      .om-caption {
+        position: fixed;
+        z-index: 40;
+        pointer-events: none;
+      }
+
+      .om-caption-top-left {
+        top: 22px;
+        left: 24px;
+        max-width: min(42ch, calc(100vw - 48px));
+      }
+
+      .om-caption-title {
+        margin: 0;
+        font-family: var(--type-title);
+        font-weight: 700;
+        font-size: clamp(19px, 2.1vw, 26px);
+        line-height: 1.18;
+        letter-spacing: 0.005em;
+        color: var(--ink);
+        /* Outline on the letterforms, not on a box. paint-order keeps the
+           stroke behind the fill where it is supported; the text-shadow is
+           the fallback that does the same job without eating the glyphs. */
+        -webkit-text-stroke: 0.9px #fff;
+        paint-order: stroke fill;
+        text-shadow:
+          0 0 1px #fff,
+          0 0 2px rgba(255, 255, 255, 0.95),
+          0 1px 3px rgba(255, 255, 255, 0.7);
+        text-wrap: balance;
+      }
+
+      /* The abstract sits directly under the title: same typewriter voice,
+         quieter weight, and a soft white halo so it stays legible over both
+         the basemap and the historical imagery. */
+      .om-caption-abstract {
+        margin: 9px 0 0;
+        max-width: 46ch;
+        font-family: var(--type-ui);
+        font-size: clamp(10.5px, 0.82vw, 12px);
+        line-height: 1.62;
+        letter-spacing: 0.012em;
+        color: rgba(12, 14, 38, 0.92);
+        text-shadow:
+          0 0 2px rgba(255, 255, 255, 1),
+          0 0 4px rgba(255, 255, 255, 0.98),
+          0 1px 3px rgba(255, 255, 255, 0.9);
+        text-wrap: pretty;
+      }
+
+      /* ---------- lower-right controls ---------- */
+
+      .controls {
+        position: fixed;
+        right: 18px;
+        bottom: calc(12px + var(--credit-h));
+        z-index: 40;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 10px;
+      }
+
+      .controls-row {
+        display: flex;
+        gap: 8px;
+      }
+
+      .ctl {
+        font-family: var(--type-ui);
+        font-size: 12.5px;
+        line-height: 1;
+        letter-spacing: 0.05em;
+        color: var(--ink);
+        background: var(--panel);
+        -webkit-backdrop-filter: blur(9px) saturate(1.05);
+        backdrop-filter: blur(9px) saturate(1.05);
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        padding: 9px 13px;
+        cursor: pointer;
+      }
+
+      .ctl:hover { background: rgba(255, 255, 255, 0.6); }
+      .ctl:active { background: rgba(255, 255, 255, 0.75); }
+      .ctl[aria-expanded="true"] {
+        background: rgba(255, 255, 255, 0.78);
+        border-color: var(--ink);
+      }
+      .ctl:focus-visible,
+      .panel :focus-visible {
+        outline: 1.5px solid var(--ink);
+        outline-offset: 2px;
+      }
+
+      /* ---------- panels ---------- */
+
+      .panel {
+        width: 274px;
+        background: var(--panel);
+        -webkit-backdrop-filter: blur(11px) saturate(1.05);
+        backdrop-filter: blur(11px) saturate(1.05);
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        padding: 13px 14px 14px;
+        color: var(--ink);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .panel[hidden] { display: none; }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        padding: 0 0 8px;
+        border-bottom: 1px solid var(--line-soft);
+        font-family: var(--type-ui);
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      /* mode options (Timeline / Compare) */
+
+      .panel-sub {
+        margin: -4px 0 8px;
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        color: var(--ink-soft);
+      }
+
+      .opt {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        padding: 7px 0;
+        cursor: pointer;
+      }
+
+      .opt input {
+        appearance: none;
+        -webkit-appearance: none;
+        flex: none;
+        width: 11px;
+        height: 11px;
+        margin: 3px 0 0;
+        border: 1px solid var(--ink);
+        border-radius: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+      .opt input:checked { background: var(--ink); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9); }
+
+      .opt-name { display: block; font-size: 12px; }
+
+      .mode-block { padding-bottom: 4px; }
+      .mode-block + .mode-block { border-top: 1px dotted var(--line-soft); }
+
+      /* compare layer list */
+
+      .cmp-block { margin-top: 2px; }
+
+      .cmp-list {
+        max-height: min(42vh, 320px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        margin: 4px 0 2px;
+        padding-right: 2px;
+      }
+
+      .cmp-item {
+        padding: 6px 0;
+        border-bottom: 1px dotted var(--line-soft);
+      }
+      .cmp-item:last-child { border-bottom: 0; }
+
+      .cmp-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        cursor: pointer;
+      }
+
+      .cmp-row input {
+        appearance: none;
+        -webkit-appearance: none;
+        flex: none;
+        width: 11px;
+        height: 11px;
+        margin: 3px 0 0;
+        border: 1px solid var(--ink);
+        border-radius: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+      .cmp-row input:checked { background: var(--ink); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9); }
+
+      .cmp-name {
+        display: block;
+        font-size: 11px;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+      }
+
+      .cmp-op {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 3px 0 0 20px;
+      }
+
+      .cmp-op input[type="range"] { flex: 1; }
+      .cmp-op input[type="range"]:disabled { cursor: default; opacity: 0.35; }
+
+      .cmp-pct {
+        flex: none;
+        width: 34px;
+        text-align: right;
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+        color: var(--ink-soft);
+      }
+
+      .panel-foot {
+        margin: 10px 0 0;
+        padding-top: 8px;
+        border-top: 1px solid var(--line-soft);
+        font-size: 9.5px;
+        line-height: 1.45;
+        color: var(--ink-soft);
+      }
+
+      /* timeline */
+
+      .period-value {
+        font-family: var(--type-title);
+        font-weight: 700;
+        font-size: 17px;
+        letter-spacing: 0.03em;
+        margin: 0 0 2px;
+      }
+
+      .period-sheets {
+        margin: 0 0 8px;
+        font-size: 9.5px;
+        line-height: 1.35;
+        letter-spacing: 0.02em;
+        color: var(--ink-soft);
+      }
+
+      .slider-block { margin-bottom: 14px; }
+      .slider-block:last-of-type { margin-bottom: 0; }
+
+      .slider-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 7px;
+      }
+
+      .field-label {
+        font-size: 9.5px;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+      }
+
+      .field-value { font-size: 11px; font-variant-numeric: tabular-nums; }
+
+      input[type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+        display: block;
+        width: 100%;
+        height: 16px;
+        margin: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+      input[type="range"]::-webkit-slider-runnable-track {
+        height: 1.5px;
+        background: rgba(12, 14, 38, 0.55);
+      }
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 10px;
+        height: 15px;
+        margin-top: -7px;
+        border: 1px solid var(--ink);
+        border-radius: 1px;
+        background: #fff;
+      }
+      input[type="range"]::-moz-range-track {
+        height: 1.5px;
+        background: rgba(12, 14, 38, 0.55);
+      }
+      input[type="range"]::-moz-range-thumb {
+        width: 8px;
+        height: 13px;
+        border: 1px solid var(--ink);
+        border-radius: 1px;
+        background: #fff;
+      }
+
+      .ticks {
+        position: relative;
+        height: 13px;
+        margin-top: 3px;
+      }
+      .ticks span {
+        position: absolute;
+        top: 0;
+        transform: translateX(-50%);
+        font-size: 9px;
+        letter-spacing: 0.02em;
+        color: var(--ink-soft);
+        white-space: nowrap;
+      }
+      .ticks span:first-child { transform: translateX(-15%); }
+      .ticks span:last-child { transform: translateX(-85%); }
+
+      /* ---------- metadata panel ---------- */
+
+      .meta {
+        position: fixed;
+        right: 18px;
+        top: 92px;
+        bottom: calc(12px + var(--credit-h));
+        z-index: 35;
+        width: var(--meta-w);
+        max-width: calc(100vw - 36px);
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+        -webkit-backdrop-filter: blur(11px) saturate(1.05);
+        backdrop-filter: blur(11px) saturate(1.05);
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        color: var(--ink);
+      }
+
+      .meta[hidden] { display: none; }
+
+      .meta-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px 12px 10px 14px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .meta-eyebrow {
+        margin: 0 0 3px;
+        font-size: 9px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+      }
+
+      .meta-title {
+        margin: 0;
+        font-family: var(--type-title);
+        font-weight: 700;
+        font-size: 15px;
+        line-height: 1.25;
+      }
+
+      .meta-close {
+        flex: none;
+        margin-left: auto;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        font-family: var(--type-ui);
+        font-size: 14px;
+        line-height: 1;
+        color: var(--ink);
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 2px;
+        cursor: pointer;
+      }
+      .meta-close:hover { border-color: var(--line); }
+
+      .meta-body {
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 12px 14px 16px;
+        font-size: 11.5px;
+        line-height: 1.5;
+      }
+
+      .meta figure { margin: 0 0 13px; }
+      .meta figure img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid var(--line-soft);
+        background: rgba(255, 255, 255, 0.6);
+      }
+      .meta figcaption {
+        margin-top: 5px;
+        font-size: 9.5px;
+        line-height: 1.4;
+        color: var(--ink-soft);
+      }
+
+      .subject {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin: 0 0 12px;
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .subject .swatch {
+        width: 9px;
+        height: 9px;
+        border: 1px solid rgba(12, 14, 38, 0.35);
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 92px 1fr;
+        gap: 10px;
+        padding: 5px 0;
+        border-bottom: 1px dotted var(--line-soft);
+      }
+      .row:last-child { border-bottom: 0; }
+      .row dt {
+        margin: 0;
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        padding-top: 2px;
+      }
+      .row dd { margin: 0; overflow-wrap: anywhere; }
+      .row dd.num { font-variant-numeric: tabular-nums; }
+      .row dd.path { font-size: 10px; color: var(--ink-soft); }
+
+      /* controls move out of the metadata panel's way */
+      body.meta-open .controls { right: calc(18px + var(--meta-w) + 16px); }
+
+      /* ---------- hover card ---------- */
+
+      .hovercard {
+        position: fixed;
+        z-index: 30;
+        width: 262px;
+        max-height: min(58vh, 460px);
+        overflow: hidden;
+        padding: 9px 10px 8px;
+        background: rgba(255, 255, 255, 0.58);
+        -webkit-backdrop-filter: blur(8px) saturate(1.05);
+        backdrop-filter: blur(8px) saturate(1.05);
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        color: var(--ink);
+        font-size: 10.5px;
+        line-height: 1.42;
+        pointer-events: none;
+      }
+      .hovercard[hidden] { display: none; }
+
+      .hovercard h3 {
+        margin: 0 0 5px;
+        font-family: var(--type-title);
+        font-weight: 700;
+        font-size: 12px;
+        line-height: 1.25;
+      }
+      .hovercard .hc-row {
+        display: grid;
+        grid-template-columns: 78px 1fr;
+        gap: 7px;
+        padding: 1.5px 0;
+      }
+      .hovercard .hc-label {
+        font-size: 8.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        padding-top: 1.5px;
+      }
+      .hovercard .hc-value { overflow-wrap: anywhere; }
+      .hovercard .hc-foot {
+        margin: 5px 0 0;
+        padding-top: 4px;
+        border-top: 1px solid var(--line-soft);
+        font-size: 8.5px;
+        letter-spacing: 0.04em;
+        color: var(--ink-soft);
+      }
+
+      /* ---------- selected point marker ---------- */
+
+      #marker {
+        position: fixed;
+        left: 0;
+        top: 0;
+        z-index: 20;
+        width: 19px;
+        height: 19px;
+        margin: -9.5px 0 0 -9.5px;
+        border: 1.5px solid var(--ink);
+        border-radius: 50%;
+        box-shadow:
+          0 0 0 1.5px rgba(255, 255, 255, 0.92),
+          inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+        pointer-events: none;
+      }
+      #marker[hidden] { display: none; }
+
+      /* ---------- required credits ---------- */
+
+      .om-credit {
+        position: fixed;
+        left: 18px;
+        bottom: calc(12px + var(--credit-h) + 96px);
+        z-index: 5;
+        max-width: min(24rem, calc(100% - 36px));
+        padding: 3px 6px;
+        border: 1px solid var(--line-soft);
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.55);
+        font-size: 10px;
+        line-height: 1.45;
+        color: var(--ink-soft);
+      }
+      .om-credit a { color: var(--ink); }
+      .om-credit-mark { display: none; }
+      body:has([data-om-badge]) .om-credit { display: none; }
+
+      /* Provider attribution sits above the lower-right controls. */
+      [data-om-widget-slot="bottom-end"] { bottom: 12px !important; }
+
+      /* ---------- responsive ---------- */
+
+      @media (max-width: 900px) {
+        :root { --meta-w: 100%; }
+        body.meta-open .controls { right: 18px; }
+        body.meta-open .controls,
+        body.meta-open .hovercard { display: none; }
+      }
+
+      @media (max-width: 900px) {
+        .meta {
+          left: 12px;
+          right: 12px;
+          top: auto;
+          bottom: 12px;
+          width: auto;
+          max-width: none;
+          max-height: 58vh;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .om-caption-top-left { top: 14px; left: 14px; max-width: calc(100vw - 28px); }
+        .om-caption-title { font-size: 18px; }
+        .om-caption-abstract { margin-top: 7px; font-size: 10.5px; line-height: 1.5; max-width: 34ch; }
+        .controls { right: 12px; bottom: calc(10px + var(--credit-h)); }
+        .panel { width: min(274px, calc(100vw - 24px)); }
+        .meta { top: auto; bottom: 12px; max-height: 62vh; }
+        .hovercard { display: none; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { transition: none !important; animation: none !important; }
+      }
+
+      @media print {
+        .controls, .hovercard, .meta-close { display: none !important; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <om-map
+      center="[113.981440, 22.329037]"
+      zoom="11.07"
+      basemap="osm"
+    >
+      <om-layer
+            id="T1200_190SE_D_196801_modified_22cd3a28_97da_4b43_9a88_708e829d66c5"
+            type="COGLayer"
+            label="T1200-190SE_D-196801_modified"
+            src="layer-1-t1200_190se_d_196801_modified_22cd3a28_97da_4b43.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="T1200_207NE_B_196802_modified_03bddc70_106b_45e1_8e3e_c5ef396adb34"
+            type="COGLayer"
+            label="T1200-207NE_B-196802_modified"
+            src="layer-2-t1200_207ne_b_196802_modified_03bddc70_106b_45e1.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="T1200_190SE_D_197812_modified_4ceb8c13_093f_4108_86c5_91a707ad402d"
+            type="COGLayer"
+            label="T1200-190SE_D-197812_modified"
+            src="layer-3-t1200_190se_d_197812_modified_4ceb8c13_093f_4108.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="T1200_207NE_B_197807_modified_32265cf2_66bb_40a3_b678_0b08c510cfad"
+            type="COGLayer"
+            label="T1200-207NE_B-197807_modified"
+            src="layer-4-t1200_207ne_b_197807_modified_32265cf2_66bb_40a3.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="HP1C_09SE13A_198704_modified_6b95ddb4_348f_49ba_8944_0f3be54c6dd5"
+            type="COGLayer"
+            label="HP1C-09SE13A-198704_modified"
+            src="layer-5-hp1c_09se13a_198704_modified_6b95ddb4_348f_49ba_.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="HP1C_09SE13A_199805_modified_c9110147_e67c_439f_8902_0d509720c0b7"
+            type="COGLayer"
+            label="HP1C-09SE13A-199805_modified"
+            src="layer-6-hp1c_09se13a_199805_modified_c9110147_e67c_439f_.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="HP1C_09SE13A_200803_modified_e43825a2_0ba4_43d2_9692_35abd8dc42e8"
+            type="COGLayer"
+            label="HP1C-09SE13A-200803_modified"
+            src="layer-7-hp1c_09se13a_200803_modified_e43825a2_0ba4_43d2_.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="HP1C_09SE13C_198709_modified_8e0f284f_90e1_44c1_bbc5_c9f937528cc8"
+            type="COGLayer"
+            label="HP1C-09SE13C-198709_modified"
+            src="layer-8-hp1c_09se13c_198709_modified_8e0f284f_90e1_44c1_.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="HP1C_09SE13C_199910_modified_8bce7e8d_9809_4fbd_9e06_7fa580a74597"
+            type="COGLayer"
+            label="HP1C-09SE13C-199910_modified"
+            src="layer-9-hp1c_09se13c_199910_modified_8bce7e8d_9809_4fbd_.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="HP1C_09SE13C_200801_modified_367a29c2_5cde_49c2_9229_2146827a1922"
+            type="COGLayer"
+            label="HP1C-09SE13C-200801_modified"
+            src="layer-10-hp1c_09se13c_200801_modified_367a29c2_5cde_49c2_.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="SE9A_2026"
+            type="COGLayer"
+            label="9SEA_2026"
+            src="layer-11-9se_a_2026.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="SE9C_2026"
+            type="COGLayer"
+            label="9SEC_2026"
+            src="layer-12-9se_c_2026.tif"
+            visible="false"
+          ></om-layer>
+      <om-layer
+            id="B05_sheet_3c4d874a_b942_4d3a_a0b6_94ff73568ed8"
+            type="GeoJsonLayer"
+            label="B05 sheet"
+            get-fill-color="$photo_subject == 'architecture' ? '#a6cee3' : $photo_subject == 'cemetery' ? '#d1d86d' : $photo_subject == 'home altar' ? '#b2df8a' : $photo_subject == 'landscape' ? '#e3a6e1' : $photo_subject == 'shrine' ? '#e3caa6' : $photo_subject == 'village' ? '#7793ce' : '#d45aab'"
+            get-line-color="'#232323'"
+            get-line-width="1"
+            line-width-units="pixels"
+            get-point-radius="3.779528"
+            point-radius-units="pixels"
+            pickable="true"
+            auto-highlight="true"
+            highlight-color="#ffffff55"
+          >
+            <script type="application/x-om-gzip">
+      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
+            </script>
+          </om-layer>
+      <om-layer
+            id="B05_sheet_3c4d874a_b942_4d3a_a0b6_94ff73568ed8-labels"
+            type="TextLayer"
+            label="B05 sheet (labels)"
+            get-text="$label"
+            get-position="$geometry.coordinates"
+            get-color="'#323232'"
+            get-size="16"
+            size-units="pixels"
+            font-family="Open Sans"
+            get-alignment-baseline="'bottom'"
+            get-pixel-offset="[0, -5.779528]"
+            background="true"
+            get-background-color="'#ffffffcc'"
+            background-padding="[4.15748, 2.07874]"
+            character-set="()一井伯位側內全公南及口右君園地塔天左或房旁景村東水灶為當的神稔荒藍路輋近遠金門開附"
+            visible-zoom-range="[18, 30]"
+          >
+            <script type="application/x-om-gzip">
+      H4sIAAAAAAACCu2WXUvCUBzGv8u5UhjiznRHvQ267j68MFshmJO1LkQGGkqSDFN8wdIoKjMINBINMfwyO3v5Fh1zGXSRYrPMuhgc9j/b7znP/zxniwMxFuWAD6xzAfFA4Nb4cJgLiiE+AiiwM763D3yb8Q/zSHWX4/c4UYgB36S4wYciIikFeV7YDkUC4uuzNM04vNBDe50sBaEDIsbNsoxfokBU4KOcIIZG0+IgHNjiwuQtWK7Y9Ips1wdZI3mhVltAkqivC0BOFpp85EIz4XG6qdbzFuFpBr3hGXomPGEb5YRVq6cZE++BaFY8zl3pvZZaSdrUTFk77CuDFk7f27Wbc+VZ/mFftNOUUc6SAVFkqaD5nOo1lKeE0i/h3LHa7owGyyBLH74rI4YtsI2rKO/PN3VFsvkNp9hy7q8l+OjO5Uv6luwgrdTF13c2ci1Jt8aqkl18crYa/wT/8V6cMKOaIue0LhdwrW2RCHaSZddnUdaaRVwrWJpiiLxjMnSjaWCce8TJjnGUx5fFX79wGpkJgS4nnEZW6w9qZmgjBtgtwjMek84gdlZ6rzGi+6UXuy9ZIdsNAAA=
+            </script>
+          </om-layer>
+      <om-widget type="zoom-controls" position="bottom-left"></om-widget>
+      <om-widget type="scale-bar" position="bottom-left"></om-widget>
+      <om-fallback>
+        <div>
+          <h1>1992 Tung Chung Valley Archives</h1>
+          <p>This interactive map needs JavaScript. Open this page in a web browser to view it.</p>
+        </div>
+      </om-fallback>
+    </om-map>
+
+    <div class="om-caption om-caption-top-left">
+      <div class="om-caption-title">1992 Tung Chung Valley Archives</div>
+      <p class="om-caption-abstract">With the Rose Garden Project — the building of the new airport at Chek Lap Kok — under way, the development of Tung Chung New Town was also placed on the agenda, and the Government commissioned the Department of Anthropology of The Chinese University of Hong Kong to carry out large-scale ethnographic research in the Tung Chung Valley around 1992.</p>
+    </div>
+
+    <aside class="meta" id="meta" hidden aria-label="Record details">
+      <div class="meta-head">
+        <div>
+          <p class="meta-eyebrow" id="meta-eyebrow">Record</p>
+          <h2 class="meta-title" id="meta-title"></h2>
+        </div>
+        <button class="meta-close" id="meta-close" type="button" aria-label="Close record details">&#10005;</button>
+      </div>
+      <div class="meta-body" id="meta-body"></div>
+    </aside>
+
+    <div class="hovercard" id="hovercard" hidden aria-hidden="true"></div>
+    <div id="marker" hidden></div>
+
+    <div class="controls" id="controls">
+      <section class="panel panel-layers" id="panel-layers" hidden aria-label="Map layers">
+        <h2>Map Layers</h2>
+        <p class="panel-sub">Spatial and Topographic Images</p>
+
+        <div class="mode-block">
+          <label class="opt mode">
+            <input type="checkbox" id="mode-timeline" />
+            <span class="opt-name">Timeline</span>
+          </label>
+
+          <div class="tl-block" id="tl-block" hidden>
+            <div class="slider-block">
+              <p class="period-value" id="period-value">1968</p>
+              <p class="period-sheets" id="period-sheets"></p>
+              <div class="slider-head">
+                <span class="field-label">Imagery period</span>
+              </div>
+              <input type="range" id="period" min="0" max="4" step="1" value="0"
+                     aria-label="Historical imagery period" />
+              <div class="ticks" aria-hidden="true">
+                <span style="left: 2%">1968</span>
+                <span style="left: 26%">1978</span>
+                <span style="left: 50%">1998&#8211;99</span>
+                <span style="left: 74%">2008</span>
+                <span style="left: 98%">2026</span>
+              </div>
+            </div>
+
+            <div class="slider-block">
+              <div class="slider-head">
+                <label class="field-label" for="opacity">Imagery opacity</label>
+                <span class="field-value" id="opacity-value">100%</span>
+              </div>
+              <input type="range" id="opacity" min="0" max="100" step="1" value="100"
+                     aria-label="Timeline imagery opacity" />
+            </div>
+          </div>
+        </div>
+
+        <div class="mode-block">
+          <label class="opt mode">
+            <input type="checkbox" id="mode-compare" />
+            <span class="opt-name">Compare</span>
+          </label>
+
+          <div class="cmp-block" id="cmp-block" hidden>
+            <div class="cmp-list" id="cmp-list" role="group" aria-label="Imagery layers"></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="controls-row">
+        <button class="ctl" id="btn-layers" type="button" aria-expanded="false" aria-controls="panel-layers">Map Layers</button>
+      </div>
+    </div>
+
+    <footer class="om-credit">
+      <span class="om-credit-row">Built with
+        <a href="https://onlymap.nikaplanet.com/" target="_blank" rel="noopener noreferrer">OnlyMap</a>
+        by <a href="https://nikaplanet.com" target="_blank" rel="noopener noreferrer">NIKA</a></span>
+    </footer>
+
+    <script type="module">
+      /* ------------------------------------------------------------------
+         Runtime boot: uncompress the embedded layer data, then load the
+         OnlyMap runtime. Unchanged from the export.
+         ------------------------------------------------------------------ */
+      const inflate = async (text) => {
+        const bytes = Uint8Array.from(atob(text.trim()), (c) => c.charCodeAt(0));
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+        return await new Response(stream).text();
+      };
+
+      for (const block of document.querySelectorAll('script[type="application/x-om-gzip"]')) {
+        const json = document.createElement("script");
+        json.type = "application/json";
+        json.textContent = await inflate(block.textContent);
+        block.replaceWith(json);
+      }
+
+      await import("./onlymap.js");
+
+      /* ------------------------------------------------------------------
+         Interface controller
+         ------------------------------------------------------------------ */
+      const mapEl = document.querySelector("om-map");
+
+      // Layer ids exactly as exported from QGIS2WebMap.
+      const POINTS = "B05_sheet_3c4d874a_b942_4d3a_a0b6_94ff73568ed8";
+
+      // All spatial/topographic imagery managed by the Map Layers panel.
+      // Order is the fixed stacking order (bottom to top, as exported);
+      // labels are display names only — source files and ids are unchanged.
+      const IMAGERY = [
+        { id: "T1200_190SE_D_196801_modified_22cd3a28_97da_4b43_9a88_708e829d66c5", label: "190se_d_1968/01" },
+        { id: "T1200_207NE_B_196802_modified_03bddc70_106b_45e1_8e3e_c5ef396adb34", label: "207ne_b_1968/02" },
+        { id: "T1200_190SE_D_197812_modified_4ceb8c13_093f_4108_86c5_91a707ad402d", label: "190se_d_1978/12" },
+        { id: "T1200_207NE_B_197807_modified_32265cf2_66bb_40a3_b678_0b08c510cfad", label: "207ne_b_1978/07" },
+        { id: "HP1C_09SE13A_198704_modified_6b95ddb4_348f_49ba_8944_0f3be54c6dd5", label: "09se13a_1987/04" },
+        { id: "HP1C_09SE13A_199805_modified_c9110147_e67c_439f_8902_0d509720c0b7", label: "09se13a_1998/05" },
+        { id: "HP1C_09SE13A_200803_modified_e43825a2_0ba4_43d2_9692_35abd8dc42e8", label: "09se13a_2008/03" },
+        { id: "HP1C_09SE13C_198709_modified_8e0f284f_90e1_44c1_bbc5_c9f937528cc8", label: "09se13c_1987/09" },
+        { id: "HP1C_09SE13C_199910_modified_8bce7e8d_9809_4fbd_9e06_7fa580a74597", label: "09se13c_1999/10" },
+        { id: "HP1C_09SE13C_200801_modified_367a29c2_5cde_49c2_9229_2146827a1922", label: "09se13c_2008/01" },
+        { id: "SE9A_2026", label: "9SEA_2026" },
+        { id: "SE9C_2026", label: "9SEC_2026" }
+      ];
+
+      // Timeline: five discrete positions. Each position is a group of sheets
+      // shown together (the 2026 position uses the two 9-SE sheets that
+      // replaced the broken layer0 topographic file).
+      const PERIODS = [
+        {
+          label: "1968",
+          layers: [
+            "T1200_190SE_D_196801_modified_22cd3a28_97da_4b43_9a88_708e829d66c5",
+            "T1200_207NE_B_196802_modified_03bddc70_106b_45e1_8e3e_c5ef396adb34"
+          ],
+          sheets: "T1200-190SE_D-196801 / T1200-207NE_B-196802"
+        },
+        {
+          label: "1978",
+          layers: [
+            "T1200_190SE_D_197812_modified_4ceb8c13_093f_4108_86c5_91a707ad402d",
+            "T1200_207NE_B_197807_modified_32265cf2_66bb_40a3_b678_0b08c510cfad"
+          ],
+          sheets: "T1200-190SE_D-197812 / T1200-207NE_B-197807"
+        },
+        {
+          label: "1998\u20131999",
+          layers: [
+            "HP1C_09SE13A_199805_modified_c9110147_e67c_439f_8902_0d509720c0b7",
+            "HP1C_09SE13C_199910_modified_8bce7e8d_9809_4fbd_9e06_7fa580a74597"
+          ],
+          sheets: "HP1C-09SE13A-199805 / HP1C-09SE13C-199910"
+        },
+        {
+          label: "2008",
+          layers: [
+            "HP1C_09SE13A_200803_modified_e43825a2_0ba4_43d2_9692_35abd8dc42e8",
+            "HP1C_09SE13C_200801_modified_367a29c2_5cde_49c2_9229_2146827a1922"
+          ],
+          sheets: "HP1C-09SE13A-200803 / HP1C-09SE13C-200801"
+        },
+        {
+          label: "2026",
+          layers: [
+            "SE9A_2026",
+            "SE9C_2026"
+          ],
+          sheets: "9-SE-A / 9-SE-C (2026 Official Digital Topographic Map)"
+        }
+      ];
+
+      // Fields rendered in the hover card and the record panel. Working
+      // columns (photo no., box, file name, source, film keycode, handler,
+      // sorting date, photograph path, …) are deliberately not displayed.
+      const FIELDS = [
+        ["photo_subject", "Type"],
+        ["place_name", "Place"],
+        ["photographer", "Photographer"],
+        ["photographer_latitude", "Latitude"],
+        ["photographer_longitude", "Longitude"],
+        ["location_precision", "Precision"],
+        ["location_note", "Note"]
+      ];
+
+      // Capture dates are combined into a single "Date" row: one value when
+      // start and end are the same day, otherwise "start - end".
+      const DATE_KEYS = ["capture_date_start", "capture_date_end"];
+
+      const dateText = (props) => {
+        const start = hasValue(props.capture_date_start) ? String(props.capture_date_start).trim() : "";
+        const end = hasValue(props.capture_date_end) ? String(props.capture_date_end).trim() : "";
+        if (start && end && start === end) return start;
+        if (start && end) return `${start} - ${end}`;
+        return start || end;
+      };
+
+      // Ordered display rows for a record: the combined date first, then the
+      // remaining whitelisted fields that actually have a value.
+      const displayRows = (props) => {
+        const rows = [];
+        const date = dateText(props);
+        if (date) rows.push(["capture_date", "Date", date]);
+        for (const [key, label] of FIELDS) {
+          if (hasValue(props[key])) rows.push([key, label, props[key]]);
+        }
+        return rows;
+      };
+
+      // Hard rule for every popup surface (hover card + record panel): a data
+      // column is shown only via displayRows() above. Any other column — in
+      // particular raw working columns whose name contains an underscore,
+      // such as "cleaning_note" — is stripped before rendering, so it can
+      // never appear even if new columns are added to the data. A few
+      // internal keys stay available because the interface itself needs them
+      // (the photo image, the record title, the combined date).
+      const INTERNAL_KEYS = ["file_name", "capture_date_start", "capture_date_end"];
+      const APPROVED_KEYS = new Set(FIELDS.map(([key]) => key).concat(INTERNAL_KEYS));
+      const isInternalColumn = (key) =>
+        typeof key === "string" && key.includes("_") && !APPROVED_KEYS.has(key);
+      const publicProps = (props) => {
+        const clean = {};
+        for (const [key, value] of Object.entries(props || {})) {
+          if (!isInternalColumn(key)) clean[key] = value;
+        }
+        return clean;
+      };
+
+      const SUBJECT_COLOURS = {
+        architecture: "#a6cee3",
+        cemetery: "#d1d86d",
+        "home altar": "#b2df8a",
+        landscape: "#e3a6e1",
+        shrine: "#e3caa6",
+        village: "#7793ce"
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const layerEl = (id) => document.querySelector(`om-layer[id="${CSS.escape(id)}"]`);
+
+      const state = {
+        // "timeline" | "compare" | null (mutually exclusive)
+        mode: null,
+        period: 0,
+        tlOpacity: 1,
+        // per-layer Compare state, independent of Timeline opacity:
+        // id -> { on: boolean, opacity: 0..1 }
+        compare: new Map(IMAGERY.map(({ id }) => [id, { on: false, opacity: 1 }])),
+        panelOpen: false,
+        selected: null
+      };
+
+      /* ---------------- layer control ---------------- */
+
+      const setVisible = (id, on) => {
+        const el = layerEl(id);
+        if (!el) return;
+        const want = on ? "true" : "false";
+        if (el.getAttribute("visible") !== want) el.setAttribute("visible", want);
+      };
+
+      const setOpacity = (id, value) => {
+        const el = layerEl(id);
+        if (!el) return;
+        const want = String(Math.round(value * 1000) / 1000);
+        if (el.getAttribute("opacity") !== want) el.setAttribute("opacity", want);
+      };
+
+      // The single source of truth for which imagery is on screen. The open-map
+      // basemap ("osm") is permanent and is never touched here; points and
+      // overlays are never touched either. Stacking order is fixed by the
+      // order of the om-layer elements in the markup, so it never depends on
+      // the order in which layers are switched on.
+      const applyLayers = () => {
+        for (const { id } of IMAGERY) setVisible(id, false);
+        if (state.mode === "timeline") {
+          // Each period is a group of adjacent sheets shown together.
+          for (const id of PERIODS[state.period].layers) {
+            setVisible(id, true);
+            setOpacity(id, state.tlOpacity);
+          }
+        } else if (state.mode === "compare") {
+          for (const { id } of IMAGERY) {
+            const saved = state.compare.get(id);
+            if (saved && saved.on) {
+              setVisible(id, true);
+              setOpacity(id, saved.opacity);
+            }
+          }
+        }
+      };
+
+      /* ---------------- credits ---------------- */
+
+      const creditSlot = () => document.querySelector('[data-om-widget-slot="bottom-end"]');
+
+      const measureCredit = () => {
+        const slot = creditSlot();
+        const h = slot ? Math.ceil(slot.getBoundingClientRect().height) : 0;
+        document.documentElement.style.setProperty("--credit-h", `${h + 22}px`);
+      };
+
+      /* ---------------- Map Layers panel ---------------- */
+
+      const panel = $("panel-layers");
+      const btnLayers = $("btn-layers");
+
+      // Opening/closing the panel never changes layers, mode state, opacity,
+      // or the camera — it only shows or hides the controls themselves.
+      const setPanelOpen = (open) => {
+        state.panelOpen = open;
+        panel.hidden = !open;
+        btnLayers.setAttribute("aria-expanded", open ? "true" : "false");
+      };
+
+      btnLayers.addEventListener("click", () => setPanelOpen(!state.panelOpen));
+
+      /* ---------------- mode switching ---------------- */
+
+      const modeTimeline = $("mode-timeline");
+      const modeCompare = $("mode-compare");
+      const tlBlock = $("tl-block");
+      const cmpBlock = $("cmp-block");
+
+      // Timeline and Compare are mutually exclusive; clicking the active mode
+      // unchecks it and hides all panel-managed imagery (open-map basemap and
+      // points stay on). Each mode keeps its own saved settings, so switching
+      // back restores exactly what that mode had before.
+      const setMode = (mode) => {
+        state.mode = state.mode === mode ? null : mode;
+        modeTimeline.checked = state.mode === "timeline";
+        modeCompare.checked = state.mode === "compare";
+        tlBlock.hidden = state.mode !== "timeline";
+        cmpBlock.hidden = state.mode !== "compare";
+        applyLayers();
+      };
+
+      modeTimeline.addEventListener("change", () => setMode("timeline"));
+      modeCompare.addEventListener("change", () => setMode("compare"));
+
+      /* ---------------- timeline controls ---------------- */
+
+      const periodInput = $("period");
+      const periodValue = $("period-value");
+      const periodSheets = $("period-sheets");
+      const opacityInput = $("opacity");
+      const opacityValue = $("opacity-value");
+
+      const showPeriodLabel = () => {
+        const period = PERIODS[state.period];
+        periodValue.textContent = period.label;
+        if (periodSheets) periodSheets.textContent = `2 sheets \u00b7 ${period.sheets}`;
+      };
+
+      showPeriodLabel();
+
+      periodInput.addEventListener("input", () => {
+        state.period = Number(periodInput.value);
+        showPeriodLabel();
+        // The saved timeline opacity carries across positions.
+        applyLayers();
+      });
+
+      let opacityRaf = 0;
+      opacityInput.addEventListener("input", () => {
+        state.tlOpacity = Number(opacityInput.value) / 100;
+        opacityValue.textContent = `${opacityInput.value}%`;
+        if (state.mode !== "timeline") return;
+        // Each attribute write makes the runtime rebuild the layer, so batch
+        // the two sheets into one animation frame while the slider is dragged.
+        if (opacityRaf) return;
+        opacityRaf = requestAnimationFrame(() => {
+          opacityRaf = 0;
+          for (const id of PERIODS[state.period].layers) setOpacity(id, state.tlOpacity);
+        });
+      });
+
+      /* ---------------- compare list ---------------- */
+
+      const cmpList = $("cmp-list");
+
+      for (const { id, label } of IMAGERY) {
+        const saved = state.compare.get(id);
+
+        const item = document.createElement("div");
+        item.className = "cmp-item";
+
+        const row = document.createElement("label");
+        row.className = "cmp-row";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.dataset.id = id;
+        box.addEventListener("change", () => {
+          saved.on = box.checked;
+          range.disabled = !box.checked;
+          applyLayers();
+        });
+        const name = document.createElement("span");
+        name.className = "cmp-name";
+        name.textContent = label;
+        row.append(box, name);
+
+        const op = document.createElement("div");
+        op.className = "cmp-op";
+        const range = document.createElement("input");
+        range.type = "range";
+        range.min = "0";
+        range.max = "100";
+        range.step = "1";
+        range.value = "100";
+        range.disabled = true;
+        range.setAttribute("aria-label", `Opacity \u2014 ${label}`);
+        const pct = document.createElement("span");
+        pct.className = "cmp-pct";
+        pct.textContent = "100%";
+        range.addEventListener("input", () => {
+          saved.opacity = Number(range.value) / 100;
+          pct.textContent = `${range.value}%`;
+          if (!saved.on) return;
+          if (opacityRaf) return;
+          opacityRaf = requestAnimationFrame(() => {
+            opacityRaf = 0;
+            setOpacity(id, saved.opacity);
+          });
+        });
+        op.append(range, pct);
+
+        item.append(row, op);
+        cmpList.appendChild(item);
+      }
+
+      /* ---------------- picking ---------------- */
+
+      const propsOf = (picked) => {
+        if (!picked || picked.layerId !== POINTS) return null;
+        const object = picked.object ?? {};
+        // Strip internal columns (e.g. "cleaning_note") at the single point
+        // where picked data enters the interface, so the hover card and the
+        // record panel can only ever see whitelisted, displayable fields.
+        const props = publicProps(object.properties ?? object);
+        if (!props || !props.file_name) return null;
+        return props;
+      };
+
+      const pickAt = (clientX, clientY, radius) => {
+        const rect = mapEl.getBoundingClientRect();
+        if (typeof mapEl.pickAt !== "function") return null;
+        let hit = null;
+        try {
+          hit = mapEl.pickAt([clientX - rect.left, clientY - rect.top], { radius });
+        } catch (error) {
+          return null;
+        }
+        return propsOf(hit);
+      };
+
+      const overWidget = (event) =>
+        event.composedPath().some((node) => node && node.tagName === "OM-WIDGET");
+
+      const escapeHtml = (value) =>
+        String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+      const hasValue = (value) => value !== null && value !== undefined && String(value).trim() !== "";
+
+      /* ---------------- hover card ---------------- */
+
+      const hovercard = $("hovercard");
+      let hoverRaf = 0;
+      let hoverPoint = null;
+
+      const hideHover = () => {
+        hovercard.hidden = true;
+        hoverPoint = null;
+      };
+
+      const showHover = (props, x, y) => {
+        const rows = displayRows(props)
+          .map(
+            ([, label, value]) =>
+              `<div class="hc-row"><span class="hc-label">${escapeHtml(label)}</span><span class="hc-value">${escapeHtml(value)}</span></div>`
+          )
+          .join("");
+        hovercard.innerHTML = `<h3>${escapeHtml(props.place_name || props.file_name || "Record")}</h3>${rows}<p class="hc-foot">Click for the full record</p>`;
+        hovercard.hidden = false;
+
+        const gap = 16;
+        const box = hovercard.getBoundingClientRect();
+        let left = x + gap;
+        let top = y - box.height / 2;
+        if (left + box.width > window.innerWidth - 12) left = x - box.width - gap;
+        top = Math.max(12, Math.min(top, window.innerHeight - box.height - 12));
+        hovercard.style.left = `${Math.max(12, left)}px`;
+        hovercard.style.top = `${top}px`;
+      };
+
+      mapEl.addEventListener("pointermove", (event) => {
+        if (event.pointerType === "touch") return;
+        if (overWidget(event)) {
+          hideHover();
+          return;
+        }
+        if (hoverRaf) return;
+        hoverRaf = requestAnimationFrame(() => {
+          hoverRaf = 0;
+          const props = pickAt(event.clientX, event.clientY, 6);
+          if (props) showHover(props, event.clientX, event.clientY);
+          else hideHover();
+        });
+      });
+
+      mapEl.addEventListener("pointerleave", hideHover);
+
+      /* ---------------- metadata panel ---------------- */
+
+      const meta = $("meta");
+      const metaBody = $("meta-body");
+      const metaTitle = $("meta-title");
+      const metaEyebrow = $("meta-eyebrow");
+      const marker = $("marker");
+      let markerRaf = 0;
+      let markerLngLat = null;
+
+      const syncMarker = () => {
+        if (!markerLngLat || meta.hidden || typeof mapEl.project !== "function") {
+          markerRaf = 0;
+          return;
+        }
+        const point = mapEl.project(markerLngLat);
+        if (point && Number.isFinite(point[0])) {
+          marker.style.left = `${point[0]}px`;
+          marker.style.top = `${point[1]}px`;
+          marker.hidden = false;
+        }
+        markerRaf = requestAnimationFrame(syncMarker);
+      };
+
+      const startMarker = (lngLat) => {
+        markerLngLat = lngLat;
+        marker.hidden = false;
+        if (!markerRaf) markerRaf = requestAnimationFrame(syncMarker);
+      };
+
+      const closeMeta = () => {
+        meta.hidden = true;
+        marker.hidden = true;
+        markerLngLat = null;
+        state.selected = null;
+        document.body.classList.remove("meta-open");
+      };
+
+      const openMeta = (rawProps, lngLat) => {
+        const props = publicProps(rawProps);
+        const colour = SUBJECT_COLOURS[props.photo_subject] || "#888888";
+        const rows = displayRows(props)
+          .map(([, label, value]) => {
+            const cls = label === "Latitude" || label === "Longitude" ? "num" : "";
+            return `<div class="row"><dt>${escapeHtml(label)}</dt><dd class="${cls}">${escapeHtml(value)}</dd></div>`;
+          })
+          .join("");
+
+        const photo = hasValue(props.file_name)
+          ? `<figure><img src="photos/${encodeURIComponent(props.file_name)}.jpg" alt="${escapeHtml(props.place_name || props.file_name)}" loading="lazy" /><figcaption>${escapeHtml(props.place_name || "Field photograph")}</figcaption></figure>`
+          : "";
+
+        metaTitle.textContent = props.place_name || props.file_name || "Record";
+        // Photo no., box and other working identifiers are intentionally not
+        // shown anywhere in the record panel.
+        metaEyebrow.hidden = true;
+        metaBody.innerHTML = `${photo}
+          <p class="subject"><span class="swatch" style="background:${colour}"></span>${escapeHtml(props.photo_subject || "unclassified")}</p>
+          <dl>${rows}</dl>`;
+
+        const img = metaBody.querySelector("img");
+        if (img) {
+          img.addEventListener("error", () => {
+            img.closest("figure").remove();
+          });
+        }
+
+        meta.hidden = false;
+        document.body.classList.add("meta-open");
+        state.selected = props.file_name;
+        metaBody.scrollTop = 0;
+
+        if (lngLat) startMarker(lngLat);
+        else marker.hidden = true;
+      };
+
+      $("meta-close").addEventListener("click", closeMeta);
+
+      mapEl.addEventListener("click", (event) => {
+        if (overWidget(event)) return;
+        const props = pickAt(event.clientX, event.clientY, 10);
+        if (!props) return;
+        const lngLat = [props.photographer_longitude, props.photographer_latitude].map(Number);
+        openMeta(props, lngLat.every(Number.isFinite) ? lngLat : null);
+        hideHover();
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (state.panelOpen) setPanelOpen(false);
+        else closeMeta();
+      });
+
+      /* ---------------- initial state ---------------- */
+
+      // Open-map basemap and points are on from the markup; every
+      // panel-managed imagery layer starts hidden and neither mode is active.
+      applyLayers();
+      measureCredit();
+
+      const slot = creditSlot();
+      if (slot) new ResizeObserver(measureCredit).observe(slot);
+      window.addEventListener("resize", measureCredit);
+      mapEl.addEventListener("om-map-ready", measureCredit);
+    </script>
+  </body>
+</html>
