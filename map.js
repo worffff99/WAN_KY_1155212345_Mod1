@@ -271,8 +271,9 @@
               georaster:raster, pane:paneName, opacity:desired.get(id)?.opacity ?? 1,
               resolution:128, keepBuffer:2, updateWhenIdle:true
             });
-            if (typeof layer.isSupportedProjection === "function" && !layer.isSupportedProjection())
-              throw new Error(`Unsupported raster projection: ${raster.projection}. Reproject this TIFF in QGIS or provide its CRS definition.`);
+            // GeoRasterLayer validates projection while constructing/adding the layer.
+            // Do not invoke isSupportedProjection() without its projection argument:
+            // some builds try to stringify undefined and abort an otherwise valid layer.
             layer.on("tileerror", event => report("Tile rendering failed: " + entry.label, event.error));
             rasters.set(id, layer);
             const current = desired.get(id);
