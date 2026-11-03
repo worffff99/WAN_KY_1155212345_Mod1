@@ -6,7 +6,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>1992 Tung Chung Valley Archives</title>
 
-
+    <style>
+      /* Runtime fallback styling, unchanged from the export. */
+      om-map:not(:defined) {
+        display: block;
+        position: relative;
+        min-height: 240px;
+        background: #eeebe4;
+        color: #0c0e26;
+        font: 14px/1.5 "Courier New", Courier, monospace;
+      }
+      om-map:not(:defined) > :not(om-fallback) { display: none !important; }
+      om-fallback { display: none; }
+      om-map:not(:defined) > om-fallback {
+        display: grid;
+        place-content: center;
+        position: absolute;
+        inset: 0;
+        padding: 24px;
+        text-align: center;
+      }
+      om-map:not(:defined):before {
+        content: "This interactive map requires JavaScript. Open this file from a web server in a modern browser.";
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-content: center;
+        max-width: 36em;
+        margin: 0 auto;
+        padding: 24px;
+        text-align: center;
+      }
+      om-map:not(:defined):has(> om-fallback):before { content: "none"; }
+    </style>
 
     <style>
       :root {
@@ -41,7 +73,7 @@
 
       /* The map fills the viewport and owns its own stacking context, so the
          interface below always sits above the map's internal widgets. */
-      #map {
+      om-map {
         position: fixed;
         inset: 0;
         z-index: 0;
@@ -629,29 +661,83 @@
         .controls, .hovercard, .meta-close { display: none !important; }
       }
     </style>
+  
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+#map { position:fixed; inset:0; width:100%; height:100%; z-index:0; }
+.leaflet-container { font-family:"Courier New",Courier,monospace; }
+.archive-label { white-space:nowrap; background:rgba(255,255,255,.8); color:#323232; padding:2px 4px; width:max-content !important; height:auto !important; font:16px/1.3 sans-serif; }
+.archive-locate { background:white; color:#0c0e26; border:1px solid #888; padding:7px; cursor:pointer; font:11px "Courier New",monospace; }
+#map-status, #map-errors { position:fixed; left:12px; bottom:120px; z-index:100; max-width:min(600px,90vw); padding:10px; background:rgba(255,255,255,.95); color:#0c0e26; font:12px/1.5 "Courier New",monospace; }
+#map-errors { bottom:170px; max-height:25vh; overflow:auto; color:#7c2020; }
+#map-status[hidden], #map-errors[hidden] { display:none; }
+.leaflet-control-attribution { max-width:70vw; }
+</style>
 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <style>
-      #map { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
-      #map-status { position:fixed;left:16px;bottom:100px;z-index:50;max-width:min(480px,85vw);max-height:25vh;overflow:auto;padding:9px 12px;background:rgba(255,255,255,.94);color:#0c0e26;border:1px solid #aaa;font:12px/1.5 "Courier New",monospace;white-space:pre-wrap; }
-      #map-status[hidden] { display:none; }
-      .leaflet-container { background:#eeebe4; font-family:"Courier New",monospace; }
-      .archive-point-label { border:1px solid #bbb; background:rgba(255,255,255,.8); color:#323232;box-shadow:none; }
-      .leaflet-control-attribution { max-width:min(65vw,650px); }
-      :root { --credit-h: 40px; }
-    </style>
-  </head>
+<style id="archive-search-styles">
+:root { --sidebar-width:380px; }
+#archive-sidebar { position:fixed; inset:0 auto 0 0; width:var(--sidebar-width); z-index:40; overflow-y:auto; padding:22px 24px; background:rgba(248,246,240,.94); border-right:1px solid var(--line-soft); overscroll-behavior:contain; }
+#archive-sidebar .om-caption { position:static; max-width:none; }
+#archive-sidebar .om-caption-abstract { font-weight:700; }
+#map { left:var(--sidebar-width); width:calc(100% - var(--sidebar-width)); }
+#archive-search { margin-top:18px; font-size:12px; }
+#archive-search label { display:block; margin:9px 0 5px; }
+#archive-search input[type=search], #archive-search select { width:100%; padding:8px; border:1px solid var(--line); background:white; color:var(--ink); font:inherit; }
+.search-actions { display:flex; gap:7px; margin:8px 0 12px; }
+#archive-sidebar button { cursor:pointer; }
+#archive-search summary { cursor:pointer; padding:8px 0; }
+#archive-sidebar :focus-visible { outline:2px solid #335b99; outline-offset:3px; }
+#search-results { list-style:none; padding:0; margin:8px 0 14px; max-height:23vh; overflow-y:auto; border-block:1px solid var(--line-soft); }
+.result-button { display:block; width:100%; text-align:left; padding:9px 6px; background:transparent; border:0; border-bottom:1px dotted var(--line-soft); font:11px/1.5 var(--type-ui); color:var(--ink); overflow-wrap:anywhere; }
+.result-button[aria-pressed=true] { background:#dce7ed; box-shadow:inset 3px 0 #335b99; }
+#archive-sidebar #meta { position:static; width:100%; max-width:none; max-height:none; background:transparent; }
+#archive-sidebar .meta-body { max-height:50vh; overflow-y:auto; }
+body.meta-open .controls { right:18px; display:flex; }
+#hovercard { display:none !important; }
+.range-pair { position:relative; height:32px; margin:8px 0; }
+.range-pair input[type=range] { position:absolute; inset:8px 0 auto; pointer-events:none; }
+.range-pair input::-webkit-slider-thumb { pointer-events:auto; width:16px; height:20px; }
+.range-pair input::-moz-range-thumb { pointer-events:auto; width:16px; height:20px; }
+.range-pair input:focus { z-index:3; }
+.search-note { font-size:10px; line-height:1.5; color:var(--ink-soft); }
+#map-status, #map-errors { left:calc(var(--sidebar-width) + 12px); }
+@media(max-width:700px) {
+ #archive-sidebar { width:100%; height:48dvh; bottom:auto; padding:14px; border-right:0; border-bottom:1px solid var(--line); }
+ #map { left:0; top:48dvh; width:100%; height:52dvh; }
+ #archive-sidebar .om-caption { max-width:none; }
+ #archive-sidebar .om-caption-abstract { max-width:none; }
+ #archive-sidebar .meta-body { max-height:38dvh; }
+ #search-results { max-height:22dvh; }
+ #map-status, #map-errors { left:12px; max-width:calc(100vw - 24px); bottom:90px; }
+ .cmp-list { max-height:20dvh; }
+ .controls { right:12px !important; bottom:calc(8px + var(--credit-h)); }
+}
+</style>
+</head>
 
   <body>
-    <div id="map" aria-label="Tung Chung Valley archive map"></div>
-    <div id="map-status" role="status" hidden></div>
+    <div id="map" aria-label="Archive map"></div>
 
-    <div class="om-caption om-caption-top-left">
+<div id="archive-sidebar">    <div class="om-caption om-caption-top-left">
       <div class="om-caption-title">1992 Tung Chung Valley Archives</div>
       <p class="om-caption-abstract">With the Rose Garden Project — the building of the new airport at Chek Lap Kok — under way, the development of Tung Chung New Town was also placed on the agenda, and the Government commissioned the Department of Anthropology of The Chinese University of Hong Kong to carry out large-scale ethnographic research in the Tung Chung Valley around 1992.</p>
     </div>
 
-    <aside class="meta" id="meta" hidden aria-label="Record details">
+<section id="archive-search" aria-label="Search photographs">
+<form id="search-form"><label for="search-query">Search photograph metadata</label>
+<input type="search" id="search-query" placeholder="Place, date, type, photographer…">
+<div class="search-actions"><button class="ctl" type="submit">Search</button><button class="ctl" id="search-reset" type="button">Clear / Reset</button></div>
+<details><summary>Advanced filters</summary>
+<label for="date-enabled"><input id="date-enabled" type="checkbox"> Restrict capture date</label>
+<output id="date-label" aria-live="polite"></output>
+<div class="range-pair"><input id="date-start" type="range" aria-label="Start capture month"><input id="date-end" type="range" aria-label="End capture month"></div>
+<p class="search-note">Inclusive month range. Uncertain dates match if their possible period overlaps. Undated or unrecognised dates are excluded only when date filtering is enabled.</p>
+<label for="filter-type">Type</label><select id="filter-type"></select>
+<label for="filter-village">Village name</label><select id="filter-village"></select>
+<label for="filter-photographer">Photographer</label><select id="filter-photographer"></select>
+</details></form>
+<p id="result-count" role="status" aria-live="polite"></p><ul id="search-results" aria-label="Matching photographs"></ul>
+</section>    <aside class="meta" id="meta" hidden aria-label="Record details">
       <div class="meta-head">
         <div>
           <p class="meta-eyebrow" id="meta-eyebrow">Record</p>
@@ -660,7 +746,7 @@
         <button class="meta-close" id="meta-close" type="button" aria-label="Close record details">&#10005;</button>
       </div>
       <div class="meta-body" id="meta-body"></div>
-    </aside>
+    </aside></div>
 
     <div class="hovercard" id="hovercard" hidden aria-hidden="true"></div>
     <div id="marker" hidden></div>
@@ -722,9 +808,15 @@
       </div>
     </div>
 
+    
 
-
-    <script src="./archive-data.js?v=leaflet-1"></script>
-    <script src="./map-app.js?v=leaflet-1"></script>
-  </body>
+    
+  <div id="map-status" role="status" hidden></div>
+<div id="map-errors" role="alert" hidden></div>
+<script id="archive-points" type="application/json">{"features": [{"geometry": {"coordinates": [113.9281906, 22.2735663], "type": "Point"}, "id": 2, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P01", "flim_keycode": "1-8", "handler": "王羽彤", "location_note": "南輋，亦稱藍輋，位於大嶼山東涌古城附近，鄰近稔園及石榴埔村，同屬大嶼山東涌北部/南部交界一帶的鄉村。村民為李姓，十四世祖由內地遷往新安縣烏蛟騰開基立業，其後人後來遷至藍輋村定居繁衍至今。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P01", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P01.jpg", "photo_subject": "landscape", "photographer": "陳一峰", "photographer_latitude": 22.2735663, "photographer_longitude": 113.9281906, "place_name": "南(藍)輋遠景", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927062, 22.273747], "type": "Point"}, "id": 3, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P02", "flim_keycode": "1-9", "handler": "王羽彤", "location_note": "南輋，亦稱藍輋，位於大嶼山東涌古城附近，鄰近稔園及石榴埔村，同屬大嶼山東涌北部/南部交界一帶的鄉村。村民為李姓，十四世祖由內地遷往新安縣烏蛟騰開基立業，其後人後來遷至藍輋村定居繁衍至今。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P02", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P02.jpg", "photo_subject": "village", "photographer": "陳一峰", "photographer_latitude": 22.273747, "photographer_longitude": 113.927062, "place_name": "南(藍)輋全村", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927137, 22.273731], "type": "Point"}, "id": 4, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P03", "flim_keycode": "1-10", "handler": "王羽彤", "location_note": "村門是村落入口的建築標誌，上寫有村落名「南輋村」，惟「輋」字褪色。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P03", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P03.jpg", "photo_subject": "architecture", "photographer": "N/A", "photographer_latitude": 22.273731, "photographer_longitude": 113.927137, "place_name": "南(藍)輋村門", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 5, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、相片主體與P12/P19相同，但與P06/P07/P08/P10近左一井的伯公神位不同，因此修訂為(或為伯公)神位", "file_name": "B05P04", "flim_keycode": "1-13", "handler": "王羽彤", "location_note": "伯公是客家人對土地公（福德正神、土神）的親暱尊稱，「五祀 (門神、戶神、井神、灶神、土神)」之一。在客家村落中，伯公是守護地方的保護神，常出現在路口、橋頭、樹下或田頭，形式多樣（如石碑、小社壇等）。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P04", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P04.jpg", "photo_subject": "shrine", "photographer": "陳一峰", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村口路旁(或為伯公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927137, 22.273731], "type": "Point"}, "id": 6, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P11/P18主體相同，修訂place_name為「南(藍)輋村門的開門公神位」", "file_name": "B05P05", "flim_keycode": "1-14", "handler": "王羽彤", "location_note": "開門公應是俗稱或村落的獨特叫法，正式名稱是門神，「五祀 (門神、戶神、井神、灶神、土神)」之一，是東亞民間信仰中守衛大門、驅邪避凶、招福迎祥的神靈。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P05", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P05.jpg", "photo_subject": "shrine", "photographer": "N/A", "photographer_latitude": 22.273731, "photographer_longitude": 113.927137, "place_name": "南(藍)輋村門的開門公神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 7, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P09/P13主體相同，修訂place_name為「南(藍)輋村左一井及水井公神位」", "file_name": "B05P06", "flim_keycode": "1-15", "handler": "王羽彤", "location_note": "立於水井上的為水井公神位，又稱井神或與「水井媽」合稱水井公水井媽，為「五祀 (門神、戶神、井神、灶神、土神)」之一，是掌管水井與保障飲水平安的居家保護神。井神多數沒有專屬的大型廟宇，部分地方會在井邊建造小神龕供奉；若有雕刻造像，常為一男一女並肩而坐的石像，分別稱為「水井公」與「水井媽」。古人開新井時會舉行奠祭儀式；家中添丁、產婦滿月第一次挑水時，或在逢年過節、大旱求雨時，往往會向水井燃香、燒紙錢，或先倒半桶水入井以示敬意。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P06", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P06.jpg", "photo_subject": "shrine", "photographer": "陳一峰", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村左一井及水井公神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 8, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P08/P10主體相同，但與P04/P12/P19伯公神位不同，因此修訂為(或為伯公)神位", "file_name": "B05P07", "flim_keycode": "1-16", "handler": "王羽彤", "location_note": "伯公是客家人對土地公（福德正神、土神）的親暱尊稱，「五祀 (門神、戶神、井神、灶神、土神)」之一。在客家村落中，伯公是守護地方的保護神，常出現在路口、橋頭、樹下或田頭，形式多樣（如石碑、小社壇等）。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P07", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P07.jpg", "photo_subject": "shrine", "photographer": "陳一峰", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村近左一井的(或為伯公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 9, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P07/P10主體相同，但與P04/P12/P19伯公神位不同，因此修訂為(或為伯公)神位", "file_name": "B05P08", "flim_keycode": "1-17", "handler": "王羽彤", "location_note": "伯公是客家人對土地公（福德正神、土神）的親暱尊稱，「五祀 (門神、戶神、井神、灶神、土神)」之一。在客家村落中，伯公是守護地方的保護神，常出現在路口、橋頭、樹下或田頭，形式多樣（如石碑、小社壇等）。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P08", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P08.jpg", "photo_subject": "shrine", "photographer": "陳一峰", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村近左一井的(或為伯公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 10, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P06/P13主體相同，修訂place_name為「南(藍)輋村左一井及水井公神位」", "file_name": "B05P09", "flim_keycode": "1-18", "handler": "王羽彤", "location_note": "立於水井上的為水井公神位，又稱井神或與「水井媽」合稱水井公水井媽，為「五祀 (門神、戶神、井神、灶神、土神)」之一，是掌管水井與保障飲水平安的居家保護神。井神多數沒有專屬的大型廟宇，部分地方會在井邊建造小神龕供奉；若有雕刻造像，常為一男一女並肩而坐的石像，分別稱為「水井公」與「水井媽」。古人開新井時會舉行奠祭儀式；家中添丁、產婦滿月第一次挑水時，或在逢年過節、大旱求雨時，往往會向水井燃香、燒紙錢，或先倒半桶水入井以示敬意。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P09", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P09.jpg", "photo_subject": "shrine", "photographer": "陳一峰", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村左一井及水井公神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 11, "properties": {"box_no": "B05", "capture_date_end": "1992", "capture_date_start": "1992", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P07/P08主體相同，但與P04/P12/P19伯公神位不同，因此修訂為(或為伯公)神位", "file_name": "B05P10", "flim_keycode": "4-22", "handler": "王羽彤", "location_note": "伯公是客家人對土地公（福德正神、土神）的親暱尊稱，「五祀 (門神、戶神、井神、灶神、土神)」之一。在客家村落中，伯公是守護地方的保護神，常出現在路口、橋頭、樹下或田頭，形式多樣（如石碑、小社壇等）。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P10", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P10.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村近左一井的(或為伯公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927137, 22.273731], "type": "Point"}, "id": 12, "properties": {"box_no": "B05", "capture_date_end": "1992", "capture_date_start": "1992", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P05/P18主體相同，修訂place_name為「南(藍)輋村門的開門公神位」", "file_name": "B05P11", "flim_keycode": "4-23", "handler": "王羽彤", "location_note": "開門公應是俗稱或村落的獨特叫法，正式名稱是門神，「五祀 (門神、戶神、井神、灶神、土神)」之一，是東亞民間信仰中守衛大門、驅邪避凶、招福迎祥的神靈。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P11", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P11.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273731, "photographer_longitude": 113.927137, "place_name": "南(藍)輋村門的開門公神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 13, "properties": {"box_no": "B05", "capture_date_end": "1992", "capture_date_start": "1992", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、相片主體與P04/P19相同，但與P06/P07/P08/P10近左一井的伯公神位不同，因此修訂為(或為伯公)神位", "file_name": "B05P12", "flim_keycode": "4-20", "handler": "王羽彤", "location_note": "伯公是客家人對土地公（福德正神、土神）的親暱尊稱，「五祀 (門神、戶神、井神、灶神、土神)」之一。在客家村落中，伯公是守護地方的保護神，常出現在路口、橋頭、樹下或田頭，形式多樣（如石碑、小社壇等）。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P12", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P12.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村口路旁(或為伯公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 14, "properties": {"box_no": "B05", "capture_date_end": "1992", "capture_date_start": "1992", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P06/P09主體相同，修訂place_name為「南(藍)輋村左一井及水井公神位」", "file_name": "B05P13", "flim_keycode": "4-21", "handler": "王羽彤", "location_note": "立於水井上的為水井公神位，又稱井神或與「水井媽」合稱水井公水井媽，為「五祀 (門神、戶神、井神、灶神、土神)」之一，是掌管水井與保障飲水平安的居家保護神。井神多數沒有專屬的大型廟宇，部分地方會在井邊建造小神龕供奉；若有雕刻造像，常為一男一女並肩而坐的石像，分別稱為「水井公」與「水井媽」。古人開新井時會舉行奠祭儀式；家中添丁、產婦滿月第一次挑水時，或在逢年過節、大旱求雨時，往往會向水井燃香、燒紙錢，或先倒半桶水入井以示敬意。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P13", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P13.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村左一井及水井公神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.9281906, 22.2735663], "type": "Point"}, "id": 15, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P14", "flim_keycode": "10-24", "handler": "王羽彤", "location_note": "南輋，亦稱藍輋，位於大嶼山東涌古城附近，鄰近稔園及石榴埔村，同屬大嶼山東涌北部/南部交界一帶的鄉村。村民為李姓，十四世祖由內地遷往新安縣烏蛟騰開基立業，其後人後來遷至藍輋村定居繁衍至今。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P14", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P14.jpg", "photo_subject": "landscape", "photographer": "張振江", "photographer_latitude": 22.2735663, "photographer_longitude": 113.9281906, "place_name": "南(藍)輋遠景", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 16, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、新增「當天」別名「天公」作補充", "file_name": "B05P15", "flim_keycode": "10-28", "handler": "王羽彤", "location_note": "當天即「天公」，屬村內神位。拜當天是新居入伙或年節祈福時非常重要的祭祀儀式，通常在上午至中午前吉時，面向屋外或露台向著天空完成，以祈求天神賜福、保佑闔家安康與宅運。儀式順序為先拜當天（天神），次拜地主，後拜門口。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P15", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P15.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村內的當天(天公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 17, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P16", "flim_keycode": "10-29", "handler": "王羽彤", "location_note": "灶君又稱灶神、灶王爺、司命真君，「五祀 (門神、戶神、井神、灶神、土神)」之一，主理廚房與爐火、保佑闔家平安與豐衣足食，同時負有監察全家善惡的任務。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P16", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P16.jpg", "photo_subject": "home altar", "photographer": "張振江", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村內的灶君", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927137, 22.273731], "type": "Point"}, "id": 18, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P17", "flim_keycode": "10-30", "handler": "王羽彤", "location_note": "村門是村落入口的建築標誌，上寫有村落名「南輋村」，惟「輋」字褪色，並以橫批「鴻禧」及「大吉」遮擋，下有對聯，充滿新年喜慶氛圍。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P17", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P17.jpg", "photo_subject": "architecture", "photographer": "張振江", "photographer_latitude": 22.273731, "photographer_longitude": 113.927137, "place_name": "南(藍)輋村門", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927137, 22.273731], "type": "Point"}, "id": 19, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、因與P05/P11主體相同，修訂place_name為「南(藍)輋村門的開門公神位」", "file_name": "B05P18", "flim_keycode": "10-31", "handler": "王羽彤", "location_note": "開門公應是俗稱或村落的獨特叫法，正式名稱是門神，「五祀 (門神、戶神、井神、灶神、土神)」之一，是東亞民間信仰中守衛大門、驅邪避凶、招福迎祥的神靈。神位亦貼上了紅條並「大吉」揮春，充滿新年喜慶氛圍。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P18", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P18.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273731, "photographer_longitude": 113.927137, "place_name": "南(藍)輋村門的開門公神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 20, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」、相片主體與P04/P12相同，但與P06/P07/P08/P10近左一井的伯公神位不同，因此修訂為(或為伯公)神位", "file_name": "B05P19", "flim_keycode": "10-32", "handler": "王羽彤", "location_note": "伯公是客家人對土地公（福德正神、土神）的親暱尊稱。在客家村落中，伯公是守護地方的保護神，常出現在路口、橋頭、樹下或田頭，形式多樣（如石碑、小社壇等）。神位亦貼上了紅條並「大吉」揮春，充滿新年喜慶氛圍。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P19", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P19.jpg", "photo_subject": "shrine", "photographer": "張振江", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋村口路旁(或為伯公)神位", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927013, 22.273827], "type": "Point"}, "id": 21, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、依P03中村門上寫有「南X村」，更正相片地點「北峰」為「南(藍)輋」", "file_name": "B05P20", "flim_keycode": "10-33", "handler": "王羽彤", "location_note": "南輋，亦稱藍輋，位於大嶼山東涌古城附近，鄰近稔園及石榴埔村，同屬大嶼山東涌北部/南部交界一帶的鄉村。村民為李姓，十四世祖由內地遷往新安縣烏蛟騰開基立業，其後人後來遷至藍輋村定居繁衍至今，惟「荒地」不等同已確認的廢棄農田。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P20", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P20.jpg", "photo_subject": "landscape", "photographer": "N/A", "photographer_latitude": 22.273827, "photographer_longitude": 113.927013, "place_name": "南(藍)輋附近荒地", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927606, 22.273463], "type": "Point"}, "id": 22, "properties": {"box_no": "B05", "capture_date_end": "Jan-92", "capture_date_start": "Dec-91", "cleaning_note": "內容統一為繁體", "file_name": "B05P21", "flim_keycode": "1-11", "handler": "王羽彤", "location_note": "稔園位於大嶼山東涌谷一帶，鄰近藍輋村及石榴埔村，早於1980年代已廢村。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P21", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P21.jpg", "photo_subject": "landscape", "photographer": "陳一峰", "photographer_latitude": 22.273463, "photographer_longitude": 113.927606, "place_name": "稔園遠景", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927279, 22.27257], "type": "Point"}, "id": 23, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、「金塔（稔?右?)」整理為place_name「稔園右側金塔」", "file_name": "B05P22", "flim_keycode": "10-23", "handler": "王羽彤", "location_note": "金塔俗稱「瓦拔」，是中國華南地區與香港傳統喪葬習俗中的一種特製陶土容器，專門用來盛載先人起骨(執骨)後的未經火化實體骨骼。先人土葬約 6 至 12 年後，由執骨師傅破土將骸骨取出、清潔並按人體結構由下而上重新排列放入金塔內，象徵「入土為安」與保持先人身體完整。", "location_precision": "Village-level", "location_source": "Google Maps", "photo_no": "P22", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P22.jpg", "photo_subject": "cemetery", "photographer": "張振江", "photographer_latitude": 22.27257, "photographer_longitude": 113.927279, "place_name": "稔園右側金塔", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927606, 22.273463], "type": "Point"}, "id": 24, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體", "file_name": "B05P23", "flim_keycode": "10-25", "handler": "王羽彤", "location_note": "稔園位於大嶼山東涌谷一帶，鄰近藍輋村及石榴埔村，有指早於1980年代已廢村。參考地政總處1987年地圖，只剩下東、西兩房。", "location_precision": "Approximate ", "location_source": "Google Maps", "photo_no": "P23", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P23.jpg", "photo_subject": "landscape", "photographer": "張振江", "photographer_latitude": 22.273463, "photographer_longitude": 113.927606, "place_name": "稔園遠景", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.927177, 22.272402], "type": "Point"}, "id": 25, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、「?房（右）（稔?）」整理為place_name「稔園東房(右)」", "file_name": "B05P24", "flim_keycode": "10-26", "handler": "王羽彤", "location_note": "稔園位於大嶼山東涌谷一帶，鄰近藍輋村及石榴埔村，有指早於1980年代已廢村，參考地政總處1987年地圖只標註兩幢房屋，推斷相中為西邊的村屋。", "location_precision": "Approximate ", "location_source": "Map 1:1 000 9-SE-13C (Ed 1987-09)", "photo_no": "P24", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P24.jpg", "photo_subject": "architecture", "photographer": "張振江", "photographer_latitude": 22.272402, "photographer_longitude": 113.927177, "place_name": "稔園東房(右)", "sorting_date": "26-Aug-26"}, "type": "Feature"}, {"geometry": {"coordinates": [113.92738, 22.272376], "type": "Point"}, "id": 26, "properties": {"box_no": "B05", "capture_date_end": "Feb-92", "capture_date_start": "Feb-92", "cleaning_note": "內容統一為繁體、「?房（左）（稔?）」整理為place_name「稔園東房(左)」", "file_name": "B05P25", "flim_keycode": "10-27", "handler": "王羽彤", "location_note": "稔園位於大嶼山東涌谷一帶，鄰近藍輋村及石榴埔村，有指早於1980年代已廢村，參考地政總處1987年地圖只標註兩幢房屋，推斷相中為東邊的村屋。", "location_precision": "Approximate ", "location_source": "Map 1:1 000 9-SE-13C (Ed 1987-09)", "photo_no": "P25", "photo_path": "C:\\Users\\user\\OneDrive - The Chinese University of Hong Kong\\Yr4\\ANTH3323\\mod1\\B05\\B05P25.jpg", "photo_subject": "architecture", "photographer": "張振江", "photographer_latitude": 22.272376, "photographer_longitude": 113.92738, "place_name": "稔園東房(左)", "sorting_date": "26-Aug-26"}, "type": "Feature"}], "type": "FeatureCollection"}</script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/georaster@1.5.6/dist/georaster.browser.bundle.min.js"></script>
+<script src="https://unpkg.com/georaster-layer-for-leaflet/dist/georaster-layer-for-leaflet.min.js"></script>
+<script src="./map.js"></script>
+</body>
 </html>
